@@ -309,9 +309,13 @@ public:
         sampvoice_omp::Handshake handshake {};
         const auto byteCount = static_cast<std::size_t>((stream.GetNumberOfBitsUsed() + 7) / 8);
         const auto* data = stream.GetData();
-        if (isManikularSnapshot(data, byteCount))
+        // Per-packet callbacks keep the packet ID in the backing buffer even
+        // though their read cursor starts after it. The custom payload follows
+        // the SampVoice control packet ID (222).
+        if (data != nullptr && byteCount > 1 && data[0] == sampvoice_omp::ControlPacket &&
+            isManikularSnapshot(data + 1, byteCount - 1))
         {
-            handleManikularSnapshot(peer, data, byteCount);
+            handleManikularSnapshot(peer, data + 1, byteCount - 1);
             // Consume the custom raw packet before LegacyNetwork handles ID 222.
             return false;
         }

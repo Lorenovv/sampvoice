@@ -10,7 +10,6 @@
 #pragma once
 
 #include <functional>
-#include <vector>
 
 #include <Windows.h>
 
@@ -150,11 +149,11 @@ public:
         if (_rak_client_interface == nullptr || payload == nullptr || length == 0)
             return false;
 
-        std::vector<ubyte_t> packet;
-        packet.reserve(length + 1);
-        packet.push_back(222);
-        packet.insert(packet.end(), static_cast<cadr_t>(payload), static_cast<cadr_t>(payload) + length);
-        return SendPacket(packet.data(), static_cast<uint_t>(packet.size()));
+        BitStream stream;
+        stream.Write(static_cast<ubyte_t>(222));
+        stream.Write(reinterpret_cast<cstr_t>(payload), static_cast<int>(length));
+        return _rak_client_interface->Send(&stream, PacketPriority::MEDIUM_PRIORITY,
+            PacketReliability::RELIABLE_ORDERED, 0);
     }
 
 public:
