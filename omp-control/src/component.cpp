@@ -229,9 +229,17 @@ public:
     {
         core = loadedCore;
         relay.start();
+        core->getEventDispatcher().addEventHandler(this);
+    }
+
+    void onReady() override
+    {
+        // LegacyNetwork is loaded after normal components. Registering here
+        // ensures RPC 25 is attached to the real game network, not an empty
+        // network list during component discovery.
         core->addPerRPCInEventHandler<sampvoice_omp::ConnectRPC>(this);
         core->addNetworkEventHandler(this);
-        core->getEventDispatcher().addEventHandler(this);
+        networkHandlersRegistered = true;
     }
 
     void onTick(Microseconds, TimePoint) override
@@ -308,8 +316,11 @@ public:
     {
         if (core)
         {
-            core->removePerRPCInEventHandler<sampvoice_omp::ConnectRPC>(this);
-            core->removeNetworkEventHandler(this);
+            if (networkHandlersRegistered)
+            {
+                core->removePerRPCInEventHandler<sampvoice_omp::ConnectRPC>(this);
+                core->removeNetworkEventHandler(this);
+            }
             core->getEventDispatcher().removeEventHandler(this);
         }
     }
@@ -547,6 +558,7 @@ private:
     std::uint32_t keyState = 0x9E3779B9;
     std::unordered_map<int, Session> sessions;
     TimePoint nextProximityUpdate {};
+    bool networkHandlersRegistered = false;
 };
 } // namespace
 
