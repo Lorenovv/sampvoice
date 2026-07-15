@@ -20,3 +20,30 @@ jobs:
         run: cmake --build build/protocol-test --target protocol-test
       - name: Run protocol test
         run: ctest --test-dir build/protocol-test --output-on-failure
+
+  component-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: openmultiplayer/open.mp-sdk
+          path: third_party/openmp-sdk
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: openmultiplayer/open.mp-network
+          path: third_party/openmp-network
+      - name: Install 32-bit compiler support
+        run: sudo apt-get update && sudo apt-get install -y g++-multilib
+      - name: Configure component
+        run: >-
+          cmake -S omp-control -B build/component
+          -DSAMPVOICE_OMP_BUILD_COMPONENT=ON
+          -DOPENMP_SDK_ROOT=${{ github.workspace }}/third_party/openmp-sdk
+          -DOPENMP_NETWORK_INCLUDE=${{ github.workspace }}/third_party/openmp-network
+          -DCMAKE_CXX_FLAGS=-m32
+      - name: Build 32-bit component
+        run: cmake --build build/component --target sampvoice-omp-control
+      - name: Check target architecture
+        run: file build/component/sampvoice-omp-control.so | grep -F 'ELF 32-bit'
