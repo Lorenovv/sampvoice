@@ -242,6 +242,7 @@ public:
             return false;
         }
 
+        _initialized = true;
         SyncConfigs();
 
         Logger::Instance().LogToFile("[sv:dbg:speaker:initialize] : module initialized");
@@ -257,6 +258,13 @@ public:
 
     void Deinitialize() noexcept
     {
+        if (!_initialized)
+        {
+            _is_checking = false;
+            _is_recording = false;
+            return;
+        }
+
         Logger::Instance().LogToFile("[sv:dbg:speaker:deinitialize] : module releasing...");
 
         StopRecording();
@@ -275,6 +283,7 @@ public:
 
         _device = None<size_t>;
         _devices.clear();
+        _initialized = false;
 
         Logger::Instance().LogToFile("[sv:dbg:speaker:deinitialize] : module released");
     }
@@ -301,7 +310,7 @@ public:
 
     bool StartRecording() noexcept
     {
-        if (_is_recording == true)
+        if (!_initialized || _channel_record == NULL || _encoder == nullptr || _is_recording == true)
             return false;
 
         if (!PluginConfig::Instance().IsMicroEnable())
@@ -335,7 +344,7 @@ public:
     {
         _is_recording = false;
 
-        if (_is_checking == false)
+        if (_initialized && _channel_record != NULL && _is_checking == false)
         {
             if (BASS_ChannelPause(_channel_record) == FALSE)
             {
@@ -349,7 +358,7 @@ public:
 
     bool StartChecking() noexcept
     {
-        if (_is_checking == true)
+        if (!_initialized || _channel_record == NULL || _channel_check == NULL || _is_checking == true)
             return false;
 
         if (!PluginConfig::Instance().IsMicroEnable())
@@ -387,6 +396,12 @@ public:
 
     void StopChecking() noexcept
     {
+        if (!_initialized)
+        {
+            _is_checking = false;
+            return;
+        }
+
         if (_is_checking == true)
         {
             Logger::Instance().LogToFile("[sv:dbg:speaker] : checking device stoped");
@@ -399,7 +414,7 @@ public:
 
             _is_checking = false;
         }
-        if (_is_recording == false)
+        if (_channel_record != NULL && _is_recording == false)
         {
             if (BASS_ChannelPause(_channel_record) == FALSE)
             {
@@ -441,13 +456,16 @@ public:
     void SetMicroVolume(const sdword_t volume) noexcept
     {
         PluginConfig::Instance().SetMicroVolume(std::clamp(volume, 0, 100));
-        BASS_ChannelSetAttribute(_channel_record, BASS_ATTRIB_VOLDSP,
-            1.25F * static_cast<float>(PluginConfig::Instance().GetMicroVolume()) / 100);
+        if (_initialized && _channel_record != NULL)
+        {
+            BASS_ChannelSetAttribute(_channel_record, BASS_ATTRIB_VOLDSP,
+                1.25F * static_cast<float>(PluginConfig::Instance().GetMicroVolume()) / 100);
+        }
     }
 
     void SetMicroDevice(const size_t device) noexcept
     {
-        if (device < _devices.size() && device != _device)
+        if (_initialized && device < _devices.size() && device != _device)
         {
             if (BASS_RecordInit(_devices[device].second))
             {
@@ -516,12 +534,13 @@ private:
     {
         assert(length >= kFrameBytes);
 
-        if (Instance()._is_checking)
+        if (Instance()._initialized && Instance()._is_checking && Instance()._channel_check != NULL)
         {
             BASS_StreamPutData(Instance()._channel_check, buffer, kFrameBytes);
         }
 
-        if (Instance()._is_recording && Instance().Buffer.Valid())
+        if (Instance()._initialized && Instance()._is_recording && Instance()._encoder != nullptr &&
+            Instance().Buffer.Valid() && Instance().OnFrame != nullptr)
         {
             if (const opus_int32 bytes = opus_encode_float(Instance()._encoder, buffer, kFrameSamples,
                 Instance().Buffer.Data(), Instance().Buffer.Bytes()); bytes > 0)
@@ -535,6 +554,7 @@ private:
 
 private:
 
+    bool _initialized = false;
     volatile bool _is_checking  = false;
     volatile bool _is_recording = false;
 
