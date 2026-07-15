@@ -37,6 +37,7 @@ if(SAMPVOICE_OMP_BUILD_COMPONENT)
         include
         "${OPENMP_SDK_ROOT}/include"
         "${OPENMP_SDK_ROOT}/../lib/pawn/source"
+        "${OPENMP_SDK_ROOT}/../lib/pawn/source/linux"
         "${OPENMP_SDK_ROOT}/lib/glm"
         "${OPENMP_SDK_ROOT}/lib/span-lite/include"
         "${OPENMP_SDK_ROOT}/lib/string-view-lite/include"
