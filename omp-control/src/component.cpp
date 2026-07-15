@@ -7,9 +7,11 @@
 #include <sdk.hpp>
 
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <random>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <arpa/inet.h>
@@ -24,8 +26,17 @@ namespace
 {
 constexpr std::uint16_t ControlPort = 2020;
 constexpr std::uint16_t VoicePort = 2020;
+constexpr float VoiceDistance = 20.0f;
+constexpr float VoiceDistanceSquared = VoiceDistance * VoiceDistance;
+constexpr std::uint32_t VoiceChannel = 1;
 constexpr std::uint8_t CommandPlayerCreate = 1;
+constexpr std::uint8_t CommandPlayerSpeaker = 3;
+constexpr std::uint8_t CommandPlayerAttachStream = 4;
 constexpr std::uint8_t CommandPlayerDelete = 6;
+constexpr std::uint8_t CommandStreamCreate = 7;
+constexpr std::uint8_t CommandStreamTransiter = 8;
+constexpr std::uint8_t CommandStreamAttachListener = 9;
+constexpr std::uint8_t CommandStreamDetachListener = 10;
 
 class CommandRelay final
 {
@@ -159,6 +170,41 @@ struct Session
     sampvoice_omp::Handshake handshake {};
     std::uint32_t voiceKey = 0;
     std::uint64_t initializedGeneration = 0;
+    std::unordered_set<int> listeners;
+};
+
+struct SpatialCell
+{
+    int x;
+    int y;
+    int z;
+    int world;
+    unsigned interior;
+
+    bool operator==(const SpatialCell& other) const
+    {
+        return x == other.x && y == other.y && z == other.z &&
+            world == other.world && interior == other.interior;
+    }
+};
+
+struct SpatialCellHash
+{
+    std::size_t operator()(const SpatialCell& cell) const
+    {
+        std::size_t value = static_cast<std::size_t>(cell.x);
+        value = value * 31 + static_cast<std::size_t>(cell.y);
+        value = value * 31 + static_cast<std::size_t>(cell.z);
+        value = value * 31 + static_cast<std::size_t>(cell.world);
+        return value * 31 + static_cast<std::size_t>(cell.interior);
+    }
+};
+
+struct VoicePlayer
+{
+    IPlayer* player;
+    Vector3 position;
+    SpatialCell cell;
 };
 
 class SampVoiceOMPControl final : public IComponent, public SingleNetworkInEventHandler,
@@ -195,15 +241,41 @@ public:
         {
             synchronizeAll();
         }
+
+        const TimePoint now = Time::now();
+        if (now >= nextProximityUpdate)
+        {
+            nextProximityUpdate = now + Milliseconds(200);
+            updateProximity();
+        }
     }
 
     void onPeerDisconnect(IPlayer& peer, PeerDisconnectReason) override
     {
-        if (sessions.erase(peer.getID()) != 0 && relay.isConnected())
+        const int playerId = peer.getID();
+        auto source = sessions.find(playerId);
+        if (source != sessions.end())
+        {
+            for (const int listenerId : source->second.listeners)
+            {
+                detachListener(playerId, listenerId, true);
+            }
+            sessions.erase(source);
+        }
+
+        for (auto& entry : sessions)
+        {
+            if (entry.second.listeners.erase(playerId) != 0)
+            {
+                queueStreamListener(CommandStreamDetachListener, entry.first, playerId);
+            }
+        }
+
+        if (relay.isConnected())
         {
             std::vector<std::uint8_t> command(3);
             command[0] = CommandPlayerDelete;
-            sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(peer.getID()));
+            sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(playerId));
             relay.enqueue(std::move(command));
         }
     }
@@ -263,16 +335,22 @@ private:
 
         session.voiceKey = nextVoiceKey();
         session.initializedGeneration = relay.currentGeneration();
+        session.listeners.clear();
 
         std::vector<std::uint8_t> command(7);
         command[0] = CommandPlayerCreate;
         sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(peer.getID()));
         sampvoice_omp::writeUInt32BE(command.data() + 3, session.voiceKey);
         relay.enqueue(std::move(command));
+        queuePlayerSpeaker(peer.getID());
+        queuePlayerAttachStream(peer.getID());
+        queueStreamCreate(peer.getID());
 
         auto packet = sampvoice_omp::makeClientInitialize(session.voiceKey, 0, VoicePort,
             static_cast<std::uint16_t>(peer.getID()));
         peer.sendPacket(Span<std::uint8_t>(packet.data(), packet.size() * 8), OrderingChannel_SyncRPC);
+        auto channels = sampvoice_omp::makeSpeakerActiveChannels(VoiceChannel);
+        peer.sendPacket(Span<std::uint8_t>(channels.data(), channels.size() * 8), OrderingChannel_SyncRPC);
     }
 
     void synchronizeAll()
@@ -287,10 +365,188 @@ private:
         }
     }
 
+    static SpatialCell makeCell(const IPlayer& player)
+    {
+        const Vector3 position = player.getPosition();
+        return {
+            static_cast<int>(std::floor(position.x / VoiceDistance)),
+            static_cast<int>(std::floor(position.y / VoiceDistance)),
+            static_cast<int>(std::floor(position.z / VoiceDistance)),
+            player.getVirtualWorld(),
+            player.getInterior()
+        };
+    }
+
+    void queuePlayerSpeaker(int playerId)
+    {
+        std::vector<std::uint8_t> command(7);
+        command[0] = CommandPlayerSpeaker;
+        sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(playerId));
+        sampvoice_omp::writeUInt32BE(command.data() + 3, VoiceChannel);
+        relay.enqueue(std::move(command));
+    }
+
+    void queuePlayerAttachStream(int playerId)
+    {
+        std::vector<std::uint8_t> command(9);
+        command[0] = CommandPlayerAttachStream;
+        sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(playerId));
+        sampvoice_omp::writeUInt32BE(command.data() + 3, VoiceChannel);
+        sampvoice_omp::writeUInt16BE(command.data() + 7, static_cast<std::uint16_t>(playerId));
+        relay.enqueue(std::move(command));
+    }
+
+    void queueStreamCreate(int streamId)
+    {
+        std::vector<std::uint8_t> create(3);
+        create[0] = CommandStreamCreate;
+        sampvoice_omp::writeUInt16BE(create.data() + 1, static_cast<std::uint16_t>(streamId));
+        relay.enqueue(std::move(create));
+
+        std::vector<std::uint8_t> transiter(4);
+        transiter[0] = CommandStreamTransiter;
+        sampvoice_omp::writeUInt16BE(transiter.data() + 1, static_cast<std::uint16_t>(streamId));
+        transiter[3] = 1;
+        relay.enqueue(std::move(transiter));
+    }
+
+    void queueStreamListener(std::uint8_t commandType, int streamId, int playerId)
+    {
+        if (!relay.isConnected())
+        {
+            return;
+        }
+        std::vector<std::uint8_t> command(5);
+        command[0] = commandType;
+        sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(streamId));
+        sampvoice_omp::writeUInt16BE(command.data() + 3, static_cast<std::uint16_t>(playerId));
+        relay.enqueue(std::move(command));
+    }
+
+    template <std::size_t Size>
+    static void sendControlPacket(IPlayer& player, std::array<std::uint8_t, Size>& packet)
+    {
+        player.sendPacket(Span<std::uint8_t>(packet.data(), packet.size() * 8), OrderingChannel_SyncRPC);
+    }
+
+    void attachListener(int sourceId, int listenerId)
+    {
+        auto source = sessions.find(sourceId);
+        if (source == sessions.end() || !source->second.listeners.insert(listenerId).second)
+        {
+            return;
+        }
+
+        queueStreamListener(CommandStreamAttachListener, sourceId, listenerId);
+        if (IPlayer* listener = core->getPlayers().get(listenerId))
+        {
+            auto create = sampvoice_omp::makeStreamCreate(static_cast<std::uint16_t>(sourceId), VoiceDistance);
+            sendControlPacket(*listener, create);
+            auto target = sampvoice_omp::makeStreamSetTarget(static_cast<std::uint16_t>(sourceId),
+                static_cast<std::uint16_t>((2 << 14) | (sourceId & 0x3FFF)));
+            sendControlPacket(*listener, target);
+        }
+    }
+
+    void detachListener(int sourceId, int listenerId, bool notifyClient)
+    {
+        queueStreamListener(CommandStreamDetachListener, sourceId, listenerId);
+        if (notifyClient)
+        {
+            if (IPlayer* listener = core->getPlayers().get(listenerId))
+            {
+                auto deleted = sampvoice_omp::makeStreamDelete(static_cast<std::uint16_t>(sourceId));
+                sendControlPacket(*listener, deleted);
+            }
+        }
+    }
+
+    void updateProximity()
+    {
+        if (!relay.isConnected())
+        {
+            return;
+        }
+
+        std::unordered_map<int, VoicePlayer> players;
+        std::unordered_map<SpatialCell, std::vector<int>, SpatialCellHash> grid;
+        for (auto& entry : sessions)
+        {
+            if (entry.second.initializedGeneration != relay.currentGeneration())
+            {
+                continue;
+            }
+            if (IPlayer* player = core->getPlayers().get(entry.first))
+            {
+                VoicePlayer voicePlayer { player, player->getPosition(), makeCell(*player) };
+                grid[voicePlayer.cell].push_back(entry.first);
+                players.emplace(entry.first, voicePlayer);
+            }
+        }
+
+        for (auto& sourceEntry : sessions)
+        {
+            const int sourceId = sourceEntry.first;
+            auto sourcePlayer = players.find(sourceId);
+            if (sourcePlayer == players.end())
+            {
+                continue;
+            }
+
+            std::unordered_set<int> desired;
+            const SpatialCell& sourceCell = sourcePlayer->second.cell;
+            for (int x = sourceCell.x - 1; x <= sourceCell.x + 1; ++x)
+            {
+                for (int y = sourceCell.y - 1; y <= sourceCell.y + 1; ++y)
+                {
+                    for (int z = sourceCell.z - 1; z <= sourceCell.z + 1; ++z)
+                    {
+                        const SpatialCell cell { x, y, z, sourceCell.world, sourceCell.interior };
+                        const auto bucket = grid.find(cell);
+                        if (bucket == grid.end())
+                        {
+                            continue;
+                        }
+                        for (const int listenerId : bucket->second)
+                        {
+                            if (listenerId == sourceId)
+                            {
+                                continue;
+                            }
+                            const Vector3 delta = players.at(listenerId).position - sourcePlayer->second.position;
+                            if (delta.x * delta.x + delta.y * delta.y + delta.z * delta.z <= VoiceDistanceSquared)
+                            {
+                                desired.insert(listenerId);
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (auto listener = sourceEntry.second.listeners.begin(); listener != sourceEntry.second.listeners.end();)
+            {
+                if (desired.find(*listener) == desired.end())
+                {
+                    detachListener(sourceId, *listener, true);
+                    listener = sourceEntry.second.listeners.erase(listener);
+                }
+                else
+                {
+                    ++listener;
+                }
+            }
+            for (const int listenerId : desired)
+            {
+                attachListener(sourceId, listenerId);
+            }
+        }
+    }
+
     ICore* core = nullptr;
     CommandRelay relay;
     std::mt19937 random { std::random_device {}() };
     std::unordered_map<int, Session> sessions;
+    TimePoint nextProximityUpdate {};
 };
 } // namespace
 
