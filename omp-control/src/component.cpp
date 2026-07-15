@@ -43,57 +43,31 @@ public:
     ~CommandRelay()
     {
         closeConnection();
-        if (listener != -1)
-        {
-            close(listener);
-        }
     }
 
     bool start()
     {
-        listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (listener == -1)
-        {
-            return false;
-        }
-
-        const int enabled = 1;
-        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0 ||
-            fcntl(listener, F_SETFL, O_NONBLOCK) == -1)
-        {
-            close(listener);
-            listener = -1;
-            return false;
-        }
-
-        sockaddr_in address {};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        address.sin_port = htons(ControlPort);
-        if (bind(listener, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
-            listen(listener, 1) != 0)
-        {
-            close(listener);
-            listener = -1;
-            return false;
-        }
-
         return true;
     }
 
     bool tick()
     {
-        bool accepted = false;
-        if (connection == -1 && listener != -1)
+        bool connected = false;
+        if (connection == -1)
         {
-            const int candidate = accept(listener, nullptr, nullptr);
+            const int candidate = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
             if (candidate != -1)
             {
-                if (fcntl(candidate, F_SETFL, O_NONBLOCK) != -1)
+                sockaddr_in address {};
+                address.sin_family = AF_INET;
+                address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                address.sin_port = htons(ControlPort);
+                if (connect(candidate, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0 &&
+                    fcntl(candidate, F_SETFL, O_NONBLOCK) != -1 && shutdown(candidate, SHUT_RD) == 0)
                 {
                     connection = candidate;
                     ++generation;
-                    accepted = true;
+                    connected = true;
                 }
                 else
                 {
@@ -103,7 +77,7 @@ public:
         }
 
         flush();
-        return accepted;
+        return connected;
     }
 
     bool isConnected() const
@@ -157,7 +131,6 @@ private:
         offset = 0;
     }
 
-    int listener = -1;
     int connection = -1;
     std::uint64_t generation = 0;
     std::vector<std::uint8_t> pending;
