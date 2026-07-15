@@ -19,6 +19,10 @@ if(SAMPVOICE_OMP_BUILD_COMPONENT)
     target_include_directories(sampvoice-omp-control PRIVATE
         include
         "${OPENMP_SDK_ROOT}/include"
+        "${OPENMP_SDK_ROOT}/lib/glm"
+        "${OPENMP_SDK_ROOT}/lib/span-lite/include"
+        "${OPENMP_SDK_ROOT}/lib/string-view-lite/include"
+        "${OPENMP_SDK_ROOT}/lib/robin-hood-hashing/src/include"
         "${OPENMP_NETWORK_INCLUDE}"
     )
     set_target_properties(sampvoice-omp-control PROPERTIES PREFIX "" OUTPUT_NAME "sampvoice-omp-control")
