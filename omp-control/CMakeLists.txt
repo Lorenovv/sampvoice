@@ -26,6 +26,17 @@ if(SAMPVOICE_OMP_BUILD_COMPONENT)
         "${OPENMP_NETWORK_INCLUDE}"
     )
     set_target_properties(sampvoice-omp-control PROPERTIES PREFIX "" OUTPUT_NAME "sampvoice-omp-control")
+
+    add_library(sampvoice-omp-probe SHARED src/probe.cpp)
+    target_compile_features(sampvoice-omp-probe PRIVATE cxx_std_17)
+    target_include_directories(sampvoice-omp-probe PRIVATE
+        "${OPENMP_SDK_ROOT}/include"
+        "${OPENMP_SDK_ROOT}/lib/glm"
+        "${OPENMP_SDK_ROOT}/lib/span-lite/include"
+        "${OPENMP_SDK_ROOT}/lib/string-view-lite/include"
+        "${OPENMP_SDK_ROOT}/lib/robin-hood-hashing/src/include"
+    )
+    set_target_properties(sampvoice-omp-probe PROPERTIES PREFIX "" OUTPUT_NAME "sampvoice-omp-probe")
 endif()
 
 add_executable(protocol-test tests/protocol_test.cpp)

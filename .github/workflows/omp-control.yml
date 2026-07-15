@@ -41,12 +41,14 @@ jobs:
           -DOPENMP_NETWORK_INCLUDE=${{ github.workspace }}/third_party/openmp/Shared/Network
           -DCMAKE_CXX_FLAGS=-m32
       - name: Build 32-bit component
-        run: cmake --build build/component --target sampvoice-omp-control
+        run: cmake --build build/component --target sampvoice-omp-control sampvoice-omp-probe
       - name: Check target architecture
         run: file build/component/sampvoice-omp-control.so | grep -F 'ELF 32-bit'
       - name: Upload test component
         uses: actions/upload-artifact@v4
         with:
           name: sampvoice-omp-control-linux-x86
-          path: build/component/sampvoice-omp-control.so
+          path: |
+            build/component/sampvoice-omp-control.so
+            build/component/sampvoice-omp-probe.so
           if-no-files-found: error
