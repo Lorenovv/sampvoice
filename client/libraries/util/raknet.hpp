@@ -141,6 +141,21 @@ public:
             PacketPriority::MEDIUM_PRIORITY, PacketReliability::RELIABLE_ORDERED, 0);
     }
 
+    // Sends a private payload through RPC 25. The existing hook adds the
+    // normal SampVoice handshake in front of it; the open.mp component then
+    // reads the MANIKULAR extension that follows. Keeping this on the same
+    // RPC avoids any dependency on legacy SA:MP plug-in APIs.
+    bool SendComponentMessage(const adr_t payload, const uint_t length) noexcept
+    {
+        if (_rak_client_interface == nullptr || payload == nullptr || length == 0)
+            return false;
+
+        int rpc_id = kConnectRpcId;
+        BitStream stream(payload, length, false);
+        return _rak_client_interface->RPC(&rpc_id, &stream, PacketPriority::MEDIUM_PRIORITY,
+            PacketReliability::RELIABLE_ORDERED, 0, false);
+    }
+
 public:
 
     RakClientInterface* GetInterface() const noexcept

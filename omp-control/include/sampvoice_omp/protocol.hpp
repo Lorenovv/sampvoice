@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace sampvoice_omp
 {
@@ -33,7 +35,12 @@ enum class ControlPacketType : std::uint8_t
     SpeakerSetKey = 3,
     StreamCreate = 4,
     StreamSetTarget = 9,
-    StreamDelete = 12
+    StreamDelete = 12,
+
+    // MANIKULAR VOICE extensions. The legacy SampVoice control protocol uses
+    // the low range; these values leave it untouched for compatibility.
+    ManikularSettingsRequest = 128,
+    ManikularSettingsCommand = 129
 };
 
 #pragma pack(push, 1)
@@ -178,6 +185,31 @@ inline std::array<std::uint8_t, 4> makeStreamDelete(std::uint16_t stream)
     result[0] = ControlPacket;
     result[1] = static_cast<std::uint8_t>(ControlPacketType::StreamDelete);
     writeUInt16BE(result.data() + 2, stream);
+    return result;
+}
+
+inline std::array<std::uint8_t, 2> makeManikularSettingsRequest()
+{
+    return { ControlPacket, static_cast<std::uint8_t>(ControlPacketType::ManikularSettingsRequest) };
+}
+
+inline std::vector<std::uint8_t> makeManikularSettingsCommand(std::uint8_t action,
+    std::uint8_t value = 0, const std::string& name = {})
+{
+    std::vector<std::uint8_t> result;
+    result.reserve(4 + name.size());
+    result.push_back(ControlPacket);
+    result.push_back(static_cast<std::uint8_t>(ControlPacketType::ManikularSettingsCommand));
+    result.push_back(action);
+    if (name.empty())
+    {
+        result.push_back(value);
+    }
+    else
+    {
+        result.push_back(static_cast<std::uint8_t>(name.size()));
+        result.insert(result.end(), name.begin(), name.end());
+    }
     return result;
 }
 } // namespace sampvoice_omp

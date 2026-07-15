@@ -51,6 +51,12 @@ struct ControlPackets
         EffectRemoveFilter,
         EffectDelete,
 
+        // MANIKULAR VOICE extension. These values are intentionally outside
+        // the legacy SampVoice packet range, so old control packets remain
+        // byte-for-byte compatible.
+        ManikularSettingsRequest = 128,
+        ManikularSettingsCommand = 129,
+
         ENUM_END
     };
 };
@@ -633,13 +639,25 @@ private:
 
                 break;
             }
+            case ControlPackets::ManikularSettingsRequest:
+            {
+                if (size != 2) return false;
+                break;
+            }
+            case ControlPackets::ManikularSettingsCommand:
+            {
+                // action byte + optional value/name; detailed validation is
+                // performed by the handler which understands each action.
+                if (size < 3 || size > 2 + 255) return false;
+                break;
+            }
             default:
             {
                 return false;
             }
         }
 
-        Instance().OnPacket(static_cast<cadr_t>(data)[1], static_cast<cadr_t>(data) + 2);
+        Instance().OnPacket(static_cast<cadr_t>(data)[1], static_cast<cadr_t>(data) + 2, size - 2);
 
         return true;
     }
@@ -652,6 +670,6 @@ public:
 public:
 
     std::function<void(ConnectData&)>    OnHandshake;
-    std::function<void(ubyte_t, cptr_t)> OnPacket;
+    std::function<void(ubyte_t, cptr_t, uint_t)> OnPacket;
 
 };

@@ -3,7 +3,7 @@ name: OMP control foundation
 on:
   push:
     branches:
-      - codex/openmp-component
+      - codex/manikular-voice-v41
   pull_request:
     paths:
       - 'omp-control/**'

@@ -5,10 +5,16 @@
 
 #include <bitstream.hpp>
 #include <sdk.hpp>
+#include <Server/Components/Pawn/pawn.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <sstream>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -37,6 +43,20 @@ constexpr std::uint8_t CommandStreamCreate = 7;
 constexpr std::uint8_t CommandStreamTransiter = 8;
 constexpr std::uint8_t CommandStreamAttachListener = 9;
 constexpr std::uint8_t CommandStreamDetachListener = 10;
+
+constexpr std::array<std::uint8_t, 3> ManikularMagic { 'M', 'V', 1 };
+constexpr std::uint8_t ManikularSnapshot = 1;
+constexpr std::uint8_t ManikularSetMicroEnable = 1;
+constexpr std::uint8_t ManikularSetMicroVolume = 2;
+constexpr std::uint8_t ManikularSetSoundEnable = 3;
+constexpr std::uint8_t ManikularSetSoundVolume = 4;
+constexpr std::uint8_t ManikularSetSoundBalancer = 5;
+constexpr std::uint8_t ManikularSetSoundFilter = 6;
+constexpr std::uint8_t ManikularSetMicroDevice = 7;
+constexpr std::uint8_t ManikularSetMicroCheck = 8;
+constexpr std::uint8_t ManikularResetAudio = 9;
+constexpr std::uint8_t ManikularBlacklistAdd = 10;
+constexpr std::uint8_t ManikularBlacklistRemove = 11;
 
 class CommandRelay final
 {
@@ -181,7 +201,7 @@ struct VoicePlayer
 };
 
 class SampVoiceOMPControl final : public IComponent, public SingleNetworkInEventHandler,
-    public NetworkEventHandler, public CoreEventHandler
+    public NetworkEventHandler, public CoreEventHandler, public PawnEventHandler
 {
 public:
     StringView componentName() const override
@@ -202,8 +222,30 @@ public:
     void onLoad(ICore* loadedCore) override
     {
         core = loadedCore;
+        instance = this;
         relay.start();
         core->getEventDispatcher().addEventHandler(this);
+    }
+
+    void onInit(IComponentList* components) override
+    {
+        pawnComponent = components->queryComponent<IPawnComponent>();
+        if (pawnComponent != nullptr)
+        {
+            pawnComponent->getEventDispatcher().addEventHandler(this);
+            pawnHandlerRegistered = true;
+        }
+    }
+
+    void onAmxLoad(IPawnScript& script) override
+    {
+        script.Register("MV_RequestVoiceSettings", NativeRequestVoiceSettings);
+        script.Register("MV_SetVoiceOption", NativeSetVoiceOption);
+        script.Register("MV_SetVoiceBlacklist", NativeSetVoiceBlacklist);
+    }
+
+    void onAmxUnload(IPawnScript&) override
+    {
     }
 
     void onReady() override
@@ -265,14 +307,15 @@ public:
     {
         sampvoice_omp::Handshake handshake {};
         const auto byteCount = static_cast<std::size_t>((stream.GetNumberOfBitsUsed() + 7) / 8);
-        if (!sampvoice_omp::parseHandshake(stream.GetData(), byteCount, handshake))
+        const auto* data = stream.GetData();
+        if (sampvoice_omp::parseHandshake(data, byteCount, handshake))
         {
-            return true;
+            Session& session = sessions[peer.getID()];
+            session.handshake = handshake;
+            initializePlayer(peer, session);
         }
 
-        Session& session = sessions[peer.getID()];
-        session.handshake = handshake;
-        initializePlayer(peer, session);
+        handleManikularSnapshot(peer, data, byteCount);
         return true;
     }
 
@@ -288,6 +331,10 @@ public:
 
     ~SampVoiceOMPControl() override
     {
+        if (pawnComponent != nullptr && pawnHandlerRegistered)
+        {
+            pawnComponent->getEventDispatcher().removeEventHandler(this);
+        }
         if (core)
         {
             if (networkHandlersRegistered)
@@ -297,9 +344,194 @@ public:
             }
             core->getEventDispatcher().removeEventHandler(this);
         }
+        instance = nullptr;
     }
 
 private:
+    static std::string quoteJson(const std::string& value)
+    {
+        static constexpr char Hex[] = "0123456789ABCDEF";
+        std::string result;
+        result.reserve(value.size() + 2);
+        result.push_back('"');
+        for (const unsigned char character : value)
+        {
+            switch (character)
+            {
+                case '"': result += "\\\""; break;
+                case '\\': result += "\\\\"; break;
+                case '\b': result += "\\b"; break;
+                case '\f': result += "\\f"; break;
+                case '\n': result += "\\n"; break;
+                case '\r': result += "\\r"; break;
+                case '\t': result += "\\t"; break;
+                default:
+                    if (character < 0x20)
+                    {
+                        result += "\\u00";
+                        result.push_back(Hex[character >> 4]);
+                        result.push_back(Hex[character & 0x0F]);
+                    }
+                    else result.push_back(static_cast<char>(character));
+                    break;
+            }
+        }
+        result.push_back('"');
+        return result;
+    }
+
+    static bool readText(const std::uint8_t* data, std::size_t size, std::size_t& offset,
+        std::size_t maximum, std::string& value)
+    {
+        if (offset >= size) return false;
+        const std::size_t length = data[offset++];
+        if (length > maximum || length > size - offset) return false;
+        value.assign(reinterpret_cast<const char*>(data + offset), length);
+        offset += length;
+        return true;
+    }
+
+    void emitManikularSnapshot(const int playerId, const std::string& json)
+    {
+        if (pawnComponent == nullptr || pawnComponent->mainScript() == nullptr) return;
+        pawnComponent->mainScript()->Call("MV_OnVoiceSettings", DefaultReturnValue_True,
+            playerId, StringView(json.data(), json.size()));
+    }
+
+    void handleManikularSnapshot(IPlayer& peer, const std::uint8_t* data, const std::size_t size)
+    {
+        if (data == nullptr || size < ManikularMagic.size() + 1) return;
+        for (std::size_t start = 0; start + ManikularMagic.size() + 1 <= size; ++start)
+        {
+            if (!std::equal(ManikularMagic.begin(), ManikularMagic.end(), data + start) ||
+                data[start + ManikularMagic.size()] != ManikularSnapshot)
+                continue;
+
+            std::size_t offset = start + ManikularMagic.size() + 1;
+            if (size - offset < 5) return;
+            const std::uint8_t flags = data[offset++];
+            const std::uint8_t microVolume = data[offset++];
+            const std::uint8_t soundVolume = data[offset++];
+            const std::size_t deviceCount = data[offset++];
+            const std::uint8_t selectedDevice = data[offset++];
+            if (microVolume > 100 || soundVolume > 100 || deviceCount > 16) return;
+
+            std::vector<std::string> devices;
+            devices.reserve(deviceCount);
+            for (std::size_t i = 0; i != deviceCount; ++i)
+            {
+                std::string name;
+                if (!readText(data, size, offset, 120, name)) return;
+                devices.push_back(std::move(name));
+            }
+
+            if (offset >= size) return;
+            const std::size_t blacklistCount = data[offset++];
+            if (blacklistCount > 32) return;
+            std::vector<std::string> blacklist;
+            blacklist.reserve(blacklistCount);
+            for (std::size_t i = 0; i != blacklistCount; ++i)
+            {
+                std::string name;
+                if (!readText(data, size, offset, 31, name)) return;
+                blacklist.push_back(std::move(name));
+            }
+
+            std::string json = "{\"ready\":true,\"microEnabled\":";
+            json += (flags & 1) ? "true" : "false";
+            json += ",\"soundEnabled\":";
+            json += (flags & 2) ? "true" : "false";
+            json += ",\"balancer\":";
+            json += (flags & 4) ? "true" : "false";
+            json += ",\"filter\":";
+            json += (flags & 8) ? "true" : "false";
+            json += ",\"microVolume\":" + std::to_string(microVolume);
+            json += ",\"soundVolume\":" + std::to_string(soundVolume);
+            json += ",\"selectedDevice\":" + std::to_string(selectedDevice);
+            json += ",\"devices\":[";
+            for (std::size_t i = 0; i != devices.size(); ++i)
+            {
+                if (i != 0) json.push_back(',');
+                json += quoteJson(devices[i]);
+            }
+            json += "],\"blacklist\":[";
+            for (std::size_t i = 0; i != blacklist.size(); ++i)
+            {
+                if (i != 0) json.push_back(',');
+                json += quoteJson(blacklist[i]);
+            }
+            json += "]}";
+            emitManikularSnapshot(peer.getID(), json);
+            return;
+        }
+    }
+
+    bool sendManikularRequest(const int playerId)
+    {
+        IPlayer* player = core == nullptr ? nullptr : core->getPlayers().get(playerId);
+        if (player == nullptr || sessions.find(playerId) == sessions.end()) return false;
+        auto packet = sampvoice_omp::makeManikularSettingsRequest();
+        player->sendPacket(Span<std::uint8_t>(packet.data(), packet.size() * 8), OrderingChannel_SyncRPC);
+        return true;
+    }
+
+    bool sendManikularOption(const int playerId, const std::uint8_t action, const std::uint8_t value)
+    {
+        if (action < ManikularSetMicroEnable || action > ManikularResetAudio ||
+            ((action == ManikularSetMicroVolume || action == ManikularSetSoundVolume) && value > 100))
+            return false;
+        IPlayer* player = core == nullptr ? nullptr : core->getPlayers().get(playerId);
+        if (player == nullptr || sessions.find(playerId) == sessions.end()) return false;
+        auto packet = sampvoice_omp::makeManikularSettingsCommand(action, value);
+        player->sendPacket(Span<std::uint8_t>(packet.data(), packet.size() * 8), OrderingChannel_SyncRPC);
+        return true;
+    }
+
+    bool sendManikularBlacklist(const int playerId, const std::string& name, const bool add)
+    {
+        if (name.size() < 3 || name.size() > 24) return false;
+        for (const unsigned char character : name)
+        {
+            if (!((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
+                (character >= '0' && character <= '9') || character == '_' || character == '[' || character == ']'))
+                return false;
+        }
+        IPlayer* player = core == nullptr ? nullptr : core->getPlayers().get(playerId);
+        if (player == nullptr || sessions.find(playerId) == sessions.end()) return false;
+        auto packet = sampvoice_omp::makeManikularSettingsCommand(
+            add ? ManikularBlacklistAdd : ManikularBlacklistRemove, 0, name);
+        player->sendPacket(Span<std::uint8_t>(packet.data(), packet.size() * 8), OrderingChannel_SyncRPC);
+        return true;
+    }
+
+    static cell NativeRequestVoiceSettings(AMX*, cell* params)
+    {
+        if (instance == nullptr || params == nullptr || params[0] != sizeof(cell)) return 0;
+        return instance->sendManikularRequest(static_cast<int>(params[1])) ? 1 : 0;
+    }
+
+    static cell NativeSetVoiceOption(AMX*, cell* params)
+    {
+        if (instance == nullptr || params == nullptr || params[0] != 3 * sizeof(cell)) return 0;
+        const cell action = params[2];
+        const cell value = params[3];
+        if (action < 0 || action > 255 || value < 0 || value > 255) return 0;
+        return instance->sendManikularOption(static_cast<int>(params[1]),
+            static_cast<std::uint8_t>(action), static_cast<std::uint8_t>(value)) ? 1 : 0;
+    }
+
+    static cell NativeSetVoiceBlacklist(AMX* amx, cell* params)
+    {
+        if (instance == nullptr || instance->pawnComponent == nullptr || amx == nullptr || params == nullptr ||
+            params[0] != 3 * sizeof(cell)) return 0;
+        IPawnScript* script = instance->pawnComponent->getScript(amx);
+        cell* address = nullptr;
+        char name[32] {};
+        if (script == nullptr || script->GetAddr(params[2], &address) != AMX_ERR_NONE || address == nullptr ||
+            script->GetString(name, address, false, sizeof(name)) != AMX_ERR_NONE) return 0;
+        return instance->sendManikularBlacklist(static_cast<int>(params[1]), name, params[3] != 0) ? 1 : 0;
+    }
+
     std::uint32_t nextVoiceKey()
     {
         // Avoid constructing std::random_device while the component is loaded:
@@ -535,7 +767,12 @@ private:
     std::unordered_map<int, Session> sessions;
     TimePoint nextProximityUpdate {};
     bool networkHandlersRegistered = false;
+    IPawnComponent* pawnComponent = nullptr;
+    bool pawnHandlerRegistered = false;
+    static SampVoiceOMPControl* instance;
 };
+
+SampVoiceOMPControl* SampVoiceOMPControl::instance = nullptr;
 } // namespace
 
 COMPONENT_ENTRY_POINT()

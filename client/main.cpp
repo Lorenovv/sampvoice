@@ -9,6 +9,11 @@
 
 #include <Windows.h>
 
+#include <algorithm>
+#include <cstring>
+#include <iterator>
+#include <vector>
+
 #include <system/types.hpp>
 #include <memory/structures/array.hpp>
 #include <memory/structures/pool.hpp>
@@ -236,6 +241,159 @@ static void OnStopStream(const uword_t player, const uword_t stream) noexcept
 
 static IPv4Address gServerAddress;
 
+// The CEF tablet talks to the open.mp component, which forwards these compact
+// commands to this client. The client is the only side that can access Windows
+// audio devices, so it returns the current settings and device names as a
+// snapshot over the same private RPC channel.
+constexpr ubyte_t kManikularMagic[] = { 'M', 'V', 1 };
+constexpr ubyte_t kManikularSnapshot = 1;
+
+enum ManikularSettingsAction : ubyte_t
+{
+    ManikularSetMicroEnable = 1,
+    ManikularSetMicroVolume,
+    ManikularSetSoundEnable,
+    ManikularSetSoundVolume,
+    ManikularSetSoundBalancer,
+    ManikularSetSoundFilter,
+    ManikularSetMicroDevice,
+    ManikularSetMicroCheck,
+    ManikularResetAudio,
+    ManikularBlacklistAdd,
+    ManikularBlacklistRemove
+};
+
+static void ManikularAppendText(std::vector<ubyte_t>& packet, const cstr_t text, const size_t limit)
+{
+    const size_t length = std::min(std::strlen(text), limit);
+    packet.push_back(static_cast<ubyte_t>(length));
+    packet.insert(packet.end(), text, text + length);
+}
+
+static void SendManikularSettings() noexcept
+{
+    std::vector<ubyte_t> packet;
+    packet.reserve(2048);
+    packet.insert(packet.end(), std::begin(kManikularMagic), std::end(kManikularMagic));
+    packet.push_back(kManikularSnapshot);
+
+    ubyte_t flags = 0;
+    if (Speaker::Instance().IsMicroEnable()) flags |= 1;
+    if (Listener::Instance().IsSoundEnable()) flags |= 2;
+    if (Listener::Instance().IsSoundBalancer()) flags |= 4;
+    if (Listener::Instance().IsSoundFilter()) flags |= 8;
+    packet.push_back(flags);
+    packet.push_back(static_cast<ubyte_t>(std::clamp(Speaker::Instance().GetMicroVolume(), 0, 100)));
+    packet.push_back(static_cast<ubyte_t>(std::clamp(Listener::Instance().GetSoundVolume(), 0, 100)));
+
+    const auto& devices = Speaker::Instance().Devices();
+    const size_t deviceCount = std::min<size_t>(devices.size(), 16);
+    const size_t selectedDevice = Speaker::Instance().GetMicroDevice();
+    packet.push_back(static_cast<ubyte_t>(deviceCount));
+    packet.push_back(selectedDevice < deviceCount ? static_cast<ubyte_t>(selectedDevice) : 0xFF);
+    for (size_t i = 0; i != deviceCount; ++i)
+    {
+        ManikularAppendText(packet, devices[i].first.c_str(), 120);
+    }
+
+    ubyte_t blackListCount = 0;
+    const size_t countPosition = packet.size();
+    packet.push_back(0);
+    ForwardForEach(lockedPlayer, BlackList::Instance().LockedPlayers())
+    {
+        if (blackListCount == 32) break;
+        ManikularAppendText(packet, lockedPlayer->name, 31);
+        ++blackListCount;
+    }
+    packet[countPosition] = blackListCount;
+
+    if (!RakNet::Instance().SendComponentMessage(packet.data(), static_cast<uint_t>(packet.size())))
+        Logger::Instance().LogToFile("[sv:inf:manikular] : failed to send voice settings snapshot");
+}
+
+static bool IsManikularPlayerName(const cstr_t name) noexcept
+{
+    const size_t length = std::strlen(name);
+    if (length < 3 || length > 24) return false;
+    for (size_t i = 0; i != length; ++i)
+    {
+        const char character = name[i];
+        if (!((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
+            (character >= '0' && character <= '9') || character == '_' || character == '[' || character == ']'))
+            return false;
+    }
+    return true;
+}
+
+static bool HandleManikularSettingsCommand(const cptr_t data, const uint_t size) noexcept
+{
+    if (data == nullptr || size == 0) return false;
+
+    const ubyte_t action = static_cast<cadr_t>(data)[0];
+    const ubyte_t value = size > 1 ? static_cast<cadr_t>(data)[1] : 0;
+    switch (action)
+    {
+        case ManikularSetMicroEnable:
+            if (size != 2) return false;
+            Speaker::Instance().SetMicroEnable(value != 0);
+            break;
+        case ManikularSetMicroVolume:
+            if (size != 2) return false;
+            Speaker::Instance().SetMicroVolume(value);
+            break;
+        case ManikularSetSoundEnable:
+            if (size != 2) return false;
+            Listener::Instance().SetSoundEnable(value != 0);
+            break;
+        case ManikularSetSoundVolume:
+            if (size != 2) return false;
+            Listener::Instance().SetSoundVolume(value);
+            break;
+        case ManikularSetSoundBalancer:
+            if (size != 2) return false;
+            Listener::Instance().SetSoundBalancer(value != 0);
+            break;
+        case ManikularSetSoundFilter:
+            if (size != 2) return false;
+            Listener::Instance().SetSoundFilter(value != 0);
+            break;
+        case ManikularSetMicroDevice:
+            if (size != 2 || value >= Speaker::Instance().Devices().size()) return false;
+            Speaker::Instance().SetMicroDevice(value);
+            break;
+        case ManikularSetMicroCheck:
+            if (size != 2) return false;
+            if (value != 0) Speaker::Instance().StartChecking();
+            else Speaker::Instance().StopChecking();
+            break;
+        case ManikularResetAudio:
+            if (size != 1) return false;
+            Speaker::Instance().ResetConfigs();
+            Speaker::Instance().SyncConfigs();
+            Listener::Instance().ResetConfigs();
+            Listener::Instance().SyncConfigs();
+            break;
+        case ManikularBlacklistAdd:
+        case ManikularBlacklistRemove:
+        {
+            if (size < 3 || size != static_cast<uint_t>(2 + value) || value >= 32) return false;
+            char playerName[32] {};
+            std::memcpy(playerName, static_cast<cadr_t>(data) + 2, value);
+            if (!IsManikularPlayerName(playerName)) return false;
+            if (action == ManikularBlacklistAdd) BlackList::Instance().LockPlayer(playerName);
+            else BlackList::Instance().UnlockPlayer(playerName);
+            if (!BlackList::Instance().Save(Storage::Instance().GetBlacklistFile(gServerAddress)))
+                Logger::Instance().LogToFile("[sv:inf:manikular] : failed to save blacklist");
+            break;
+        }
+        default:
+            return false;
+    }
+
+    SendManikularSettings();
+    return true;
+}
+
 static void OnControlConnect(const cstr_t host, const uword_t port) noexcept
 {
     gServerAddress = IPv4Address::FromString(host, port);
@@ -252,7 +410,7 @@ static void OnControlHandshake(ConnectData& connect_data) noexcept
     connect_data.micro = Speaker::Instance().HasMicro();
 }
 
-static bool OnControlPacket(const ubyte_t packet, const cptr_t data) noexcept
+static bool OnControlPacket(const ubyte_t packet, const cptr_t data, const uint_t size) noexcept
 {
     switch (packet)
     {
@@ -673,6 +831,16 @@ static bool OnControlPacket(const ubyte_t packet, const cptr_t data) noexcept
             gEffects.Remove(content.effect, false);
 
             return true;
+        }
+        case ControlPackets::ManikularSettingsRequest:
+        {
+            if (size != 0) return false;
+            SendManikularSettings();
+            return true;
+        }
+        case ControlPackets::ManikularSettingsCommand:
+        {
+            return HandleManikularSettingsCommand(data, size);
         }
     }
 
