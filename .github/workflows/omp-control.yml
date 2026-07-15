@@ -1,0 +1,22 @@
+name: OMP control foundation
+
+on:
+  push:
+    branches:
+      - codex/openmp-component
+  pull_request:
+    paths:
+      - 'omp-control/**'
+      - '.github/workflows/omp-control.yml'
+
+jobs:
+  protocol-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure protocol test
+        run: cmake -S omp-control -B build/protocol-test
+      - name: Build protocol test
+        run: cmake --build build/protocol-test --target protocol-test
+      - name: Run protocol test
+        run: ctest --test-dir build/protocol-test --output-on-failure
