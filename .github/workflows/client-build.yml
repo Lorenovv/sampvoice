@@ -1,0 +1,36 @@
+name: Build SAMP Voice 4.1 client
+
+on:
+  push:
+    branches: [ codex/manikular-voice-v41 ]
+  workflow_dispatch:
+
+jobs:
+  build-client:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install legacy DirectX headers and libraries
+        shell: pwsh
+        run: nuget install Microsoft.DXSDK.D3DX -Version 9.29.952.8 -OutputDirectory packages
+
+      - name: Build 32-bit SAMP Voice client
+        shell: pwsh
+        run: >-
+          msbuild client/client.vcxproj
+          /p:Configuration=Release
+          /p:Platform=Win32
+          /p:PlatformToolset=v143
+          /p:WindowsTargetPlatformVersion=10.0
+          /p:D3DX_INCLUDE_PATH="$env:GITHUB_WORKSPACE\packages\Microsoft.DXSDK.D3DX.9.29.952.8\build\native\include"
+          /p:D3DX_LIBRARY_PATH="$env:GITHUB_WORKSPACE\packages\Microsoft.DXSDK.D3DX.9.29.952.8\build\native\release\lib\x86"
+
+      - name: Upload client package
+        uses: actions/upload-artifact@v4
+        with:
+          name: manikular-voice-v4.1-client
+          path: |
+            binaries/sampvoice.asi
+            client/files/binaries/*.dll
+            client/files/resources/**

@@ -68,7 +68,7 @@
     <ClCompile>
       <SDLCheck>false</SDLCheck>
       <PreprocessorDefinitions>_WINDLL;_DEBUG;WIN32;WIN32_LEAN_AND_MEAN;NOMINMAX;_CRT_RAND_S;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>../common;libraries</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../common;libraries;$(D3DX_INCLUDE_PATH)</AdditionalIncludeDirectories>
       <StringPooling>true</StringPooling>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PrecompiledHeaderFile />
@@ -79,7 +79,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>files/libraries</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>files/libraries;$(D3DX_LIBRARY_PATH)</AdditionalLibraryDirectories>
       <MinimumRequiredVersion />
       <Version>4.1</Version>
       <ImportLibrary />
@@ -99,7 +99,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>false</SDLCheck>
       <PreprocessorDefinitions>_WINDLL;NDEBUG;WIN32;WIN32_LEAN_AND_MEAN;NOMINMAX;_CRT_RAND_S;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>../common;libraries</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../common;libraries;$(D3DX_INCLUDE_PATH)</AdditionalIncludeDirectories>
       <DebugInformationFormat>None</DebugInformationFormat>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <StringPooling>true</StringPooling>
@@ -110,7 +110,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalLibraryDirectories>files/libraries</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>files/libraries;$(D3DX_LIBRARY_PATH)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <MinimumRequiredVersion />
       <SetChecksum>true</SetChecksum>
