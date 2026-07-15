@@ -247,7 +247,9 @@ namespace utils
     template <size_t Size>
     inline void bswap(const ptr_t target) noexcept
     {
-        for (size_t i = 0; i != Size; ++i)
+        // Swap every pair once. Iterating over the whole value swapped each
+        // pair twice and left floats in network byte order unchanged.
+        for (size_t i = 0; i != Size / 2; ++i)
             std::swap(static_cast<adr_t>(target)[i], static_cast<adr_t>(target)[(Size - 1) - i]);
     }
 

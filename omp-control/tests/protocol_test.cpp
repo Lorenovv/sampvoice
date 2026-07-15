@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstring>
 
 int main()
 {
@@ -36,4 +37,8 @@ int main()
     const auto target = sampvoice_omp::makeStreamSetTarget(15, (2 << 14) | 17);
     assert(target[1] == 9 && target[2] == 0 && target[3] == 15);
     assert(target[4] == 0x80 && target[5] == 17);
+
+    const auto stream = sampvoice_omp::makeStreamCreate(15, 20.0f);
+    assert(stream[1] == 4 && stream[2] == 0 && stream[3] == 15);
+    assert(stream[4] == 0x41 && stream[5] == 0xA0 && stream[6] == 0 && stream[7] == 0);
 }

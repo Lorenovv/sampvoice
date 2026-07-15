@@ -311,10 +311,17 @@ public:
     bool StartRecording() noexcept
     {
         if (!_initialized || _channel_record == NULL || _encoder == nullptr || _is_recording == true)
+        {
+            Logger::Instance().LogToFile("[sv:err:speaker] : recording unavailable (initialized:%d, channel:%u, encoder:%d, active:%d)",
+                _initialized, static_cast<uint_t>(_channel_record), _encoder != nullptr, _is_recording);
             return false;
+        }
 
         if (!PluginConfig::Instance().IsMicroEnable())
+        {
+            Logger::Instance().LogToFile("[sv:inf:speaker] : recording blocked by microphone setting");
             return false;
+        }
 
         opus_encoder_ctl(_encoder, OPUS_RESET_STATE);
 
@@ -327,10 +334,13 @@ public:
             {
                 Logger::Instance().LogToFile("[sv:err:speaker] : failed to "
                     "play record channel (code:%d)", BASS_ErrorGetCode());
+                return false;
             }
         }
 
+        _first_frame_logged = false;
         _is_recording = true;
+        Logger::Instance().LogToFile("[sv:dbg:speaker] : recording started");
 
         return true;
     }
@@ -546,6 +556,11 @@ private:
                 Instance().Buffer.Data(), Instance().Buffer.Bytes()); bytes > 0)
             {
                 Instance().OnFrame(bytes);
+                if (!Instance()._first_frame_logged)
+                {
+                    Logger::Instance().LogToFile("[sv:dbg:speaker] : first encoded frame sent (bytes:%d)", bytes);
+                    Instance()._first_frame_logged = true;
+                }
             }
         }
 
@@ -557,6 +572,7 @@ private:
     bool _initialized = false;
     volatile bool _is_checking  = false;
     volatile bool _is_recording = false;
+    volatile bool _first_frame_logged = false;
 
     HSTREAM       _channel_check  = NULL;
     HRECORD       _channel_record = NULL;

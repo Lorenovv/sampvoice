@@ -56,6 +56,7 @@ static bool gGameStatus = false;
 static Clock gSourcesClock;
 
 static Array<Source, kMaxPlayers> gSources;
+static bool gVoicePacketLogged[kMaxPlayers] = {};
 
 static Pool<Stream, kMaxStreams> gStreams;
 static Pool<Effect, kMaxEffects> gEffects;
@@ -171,11 +172,17 @@ static void MainLoop(const Time moment = Clock::Now()) noexcept
                         continue;
                     }
 
-                    const auto streams_end = reinterpret_cast<const uword_t*>(buffer + length);
+                    const auto packet_end = buffer + length;
                     auto iterator = header->streams;
                     bool valid_streams = true;
-                    while (iterator != streams_end && *iterator != None<uword_t>)
+                    bool terminator_found = false;
+                    while (reinterpret_cast<cadr_t>(iterator) + sizeof(uword_t) <= packet_end)
                     {
+                        if (*iterator == None<uword_t>)
+                        {
+                            terminator_found = true;
+                            break;
+                        }
                         if (*iterator >= kMaxStreams)
                         {
                             valid_streams = false;
@@ -183,10 +190,17 @@ static void MainLoop(const Time moment = Clock::Now()) noexcept
                         }
                         ++iterator;
                     }
-                    if (!valid_streams || iterator == streams_end || iterator + 1 >= streams_end)
+                    if (!valid_streams || !terminator_found || reinterpret_cast<cadr_t>(iterator + 1) >= packet_end)
                     {
                         Logger::Instance().LogToFile("[sv:err:voice] : ignored malformed packet from source(%hu)", header->source);
                         continue;
+                    }
+
+                    if (!gVoicePacketLogged[header->source])
+                    {
+                        Logger::Instance().LogToFile("[sv:dbg:voice] : first packet from source(%hu), packet(%u), bytes(%u)",
+                            header->source, header->packet, static_cast<uint_t>(length));
+                        gVoicePacketLogged[header->source] = true;
                     }
 
                     if (!BlackList::Instance().IsPlayerBlocked(header->source))
@@ -218,7 +232,7 @@ static void MainLoop(const Time moment = Clock::Now()) noexcept
 
 static void OnPlayStream(const uword_t player, const uword_t stream, const udword_t packet) noexcept
 {
-    // Logger::Instance().LogToChat(0xFF00FF00, "PlayStream : player(%hu), stream(%hu), packet(%u)", player, stream, packet);
+    Logger::Instance().LogToFile("[sv:dbg:voice] : play source(%hu), stream(%hu), packet(%u)", player, stream, packet);
 
     if (gStreams.Acquire<0>(stream))
     {
@@ -459,6 +473,7 @@ static bool OnControlPacket(const ubyte_t packet, const cptr_t data, const uint_
 
             for (size_t player = 0; player != kMaxPlayers; ++player)
             {
+                gVoicePacketLogged[player] = false;
                 gSources[player].OnPlayStream = std::bind(&OnPlayStream,
                     static_cast<uword_t>(player), std::placeholders::_1, std::placeholders::_2);
                 gSources[player].OnStopStream = std::bind(&OnStopStream,

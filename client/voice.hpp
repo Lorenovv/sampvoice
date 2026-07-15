@@ -267,15 +267,21 @@ public:
         // A received voice packet is untrusted network data.  It must contain
         // a terminating stream id before the Opus payload; otherwise the old
         // loop below could walk past the packet and corrupt the game process.
-        const auto streams_end = reinterpret_cast<uword_t*>(static_cast<adr_t>(buffer) + size);
+        const auto packet_end = static_cast<adr_t>(buffer) + size;
         auto stream = header->streams;
-        while (stream != streams_end && *stream != None<uword_t>)
+        bool terminator_found = false;
+        while (reinterpret_cast<adr_t>(stream) + sizeof(uword_t) <= packet_end)
         {
+            if (*stream == None<uword_t>)
+            {
+                terminator_found = true;
+                break;
+            }
             if constexpr (HostEndian != NetEndian)
                 utils::bswap(stream);
             ++stream;
         }
-        if (stream == streams_end)
+        if (!terminator_found || reinterpret_cast<adr_t>(stream + 1) >= packet_end)
             goto NextPacket;
 
         return size;
