@@ -81,30 +81,11 @@ static void OnGamePause() noexcept
     MicroIcon::Instance().SetPassiveIcon();
 
     VoiceService::Instance().SetChannels(0);
-
-    if (VoiceService::Instance().IsInitialized())
-        VoiceService::Instance().Close();
-
-    for (size_t player = 0; player != kMaxPlayers; ++player)
-    {
-        gSources[player].Reset();
-    }
-
-    for (size_t stream = 0; stream != kMaxStreams; ++stream)
-    {
-        if (gStreams.Acquire<0>(stream))
-        {
-            gStreams[stream].Reset();
-        }
-    }
 }
 
 static void OnGameResume(const Time moment = Clock::Now()) noexcept
 {
     gSourcesClock.Restart(moment);
-
-    if (VoiceService::Instance().IsInitialized())
-        VoiceService::Instance().Open();
 }
 
 // ----------------------------------------------------------------
