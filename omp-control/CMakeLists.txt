@@ -36,6 +36,7 @@ if(SAMPVOICE_OMP_BUILD_COMPONENT)
         target_include_directories(${target} PRIVATE
         include
         "${OPENMP_SDK_ROOT}/include"
+        "${OPENMP_SDK_ROOT}/../lib/pawn/source"
         "${OPENMP_SDK_ROOT}/lib/glm"
         "${OPENMP_SDK_ROOT}/lib/span-lite/include"
         "${OPENMP_SDK_ROOT}/lib/string-view-lite/include"
