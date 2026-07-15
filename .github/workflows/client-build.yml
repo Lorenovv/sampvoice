@@ -11,6 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
       - name: Install legacy DirectX headers and libraries
         shell: pwsh
         run: nuget install Microsoft.DXSDK.D3DX -Version 9.29.952.8 -OutputDirectory packages
