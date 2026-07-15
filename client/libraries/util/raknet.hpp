@@ -10,6 +10,7 @@
 #pragma once
 
 #include <functional>
+#include <vector>
 
 #include <Windows.h>
 
@@ -141,19 +142,19 @@ public:
             PacketPriority::MEDIUM_PRIORITY, PacketReliability::RELIABLE_ORDERED, 0);
     }
 
-    // Sends a private payload through RPC 25. The existing hook adds the
-    // normal SampVoice handshake in front of it; the open.mp component then
-    // reads the MANIKULAR extension that follows. Keeping this on the same
-    // RPC avoids any dependency on legacy SA:MP plug-in APIs.
+    // Sends a private packet with the SampVoice control ID. RPC 25 is only
+    // valid during the original SampVoice handshake; sending it again after
+    // joining makes the SA:MP R3 server close the game connection.
     bool SendComponentMessage(const adr_t payload, const uint_t length) noexcept
     {
         if (_rak_client_interface == nullptr || payload == nullptr || length == 0)
             return false;
 
-        int rpc_id = kConnectRpcId;
-        BitStream stream(payload, length, false);
-        return _rak_client_interface->RPC(&rpc_id, &stream, PacketPriority::MEDIUM_PRIORITY,
-            PacketReliability::RELIABLE_ORDERED, 0, false);
+        std::vector<ubyte_t> packet;
+        packet.reserve(length + 1);
+        packet.push_back(222);
+        packet.insert(packet.end(), static_cast<cadr_t>(payload), static_cast<cadr_t>(payload) + length);
+        return SendPacket(packet.data(), static_cast<uint_t>(packet.size()));
     }
 
 public:

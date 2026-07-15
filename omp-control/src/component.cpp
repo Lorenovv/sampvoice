@@ -254,6 +254,7 @@ public:
         // ensures RPC 25 is attached to the real game network, not an empty
         // network list during component discovery.
         core->addPerRPCInEventHandler<sampvoice_omp::ConnectRPC>(this);
+        core->addPerPacketInEventHandler<sampvoice_omp::ControlPacket>(this);
         core->addNetworkEventHandler(this);
         networkHandlersRegistered = true;
     }
@@ -308,14 +309,18 @@ public:
         sampvoice_omp::Handshake handshake {};
         const auto byteCount = static_cast<std::size_t>((stream.GetNumberOfBitsUsed() + 7) / 8);
         const auto* data = stream.GetData();
+        if (isManikularSnapshot(data, byteCount))
+        {
+            handleManikularSnapshot(peer, data, byteCount);
+            // Consume the custom raw packet before LegacyNetwork handles ID 222.
+            return false;
+        }
         if (sampvoice_omp::parseHandshake(data, byteCount, handshake))
         {
             Session& session = sessions[peer.getID()];
             session.handshake = handshake;
             initializePlayer(peer, session);
         }
-
-        handleManikularSnapshot(peer, data, byteCount);
         return true;
     }
 
@@ -396,6 +401,13 @@ private:
         if (pawnComponent == nullptr || pawnComponent->mainScript() == nullptr) return;
         pawnComponent->mainScript()->Call("MV_OnVoiceSettings", DefaultReturnValue_True,
             playerId, StringView(json.data(), json.size()));
+    }
+
+    bool isManikularSnapshot(const std::uint8_t* data, const std::size_t size) const
+    {
+        return data != nullptr && size >= ManikularMagic.size() + 1 &&
+            std::equal(ManikularMagic.begin(), ManikularMagic.end(), data) &&
+            data[ManikularMagic.size()] == ManikularSnapshot;
     }
 
     void handleManikularSnapshot(IPlayer& peer, const std::uint8_t* data, const std::size_t size)
