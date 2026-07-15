@@ -504,13 +504,13 @@ private:
         return true;
     }
 
-    static cell NativeRequestVoiceSettings(AMX*, cell* params)
+    static cell NativeRequestVoiceSettings(AMX*, const cell* params)
     {
         if (instance == nullptr || params == nullptr || params[0] != sizeof(cell)) return 0;
         return instance->sendManikularRequest(static_cast<int>(params[1])) ? 1 : 0;
     }
 
-    static cell NativeSetVoiceOption(AMX*, cell* params)
+    static cell NativeSetVoiceOption(AMX*, const cell* params)
     {
         if (instance == nullptr || params == nullptr || params[0] != 3 * sizeof(cell)) return 0;
         const cell action = params[2];
@@ -520,7 +520,7 @@ private:
             static_cast<std::uint8_t>(action), static_cast<std::uint8_t>(value)) ? 1 : 0;
     }
 
-    static cell NativeSetVoiceBlacklist(AMX* amx, cell* params)
+    static cell NativeSetVoiceBlacklist(AMX* amx, const cell* params)
     {
         if (instance == nullptr || instance->pawnComponent == nullptr || amx == nullptr || params == nullptr ||
             params[0] != 3 * sizeof(cell)) return 0;
