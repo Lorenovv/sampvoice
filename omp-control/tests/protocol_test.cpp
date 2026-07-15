@@ -18,4 +18,11 @@ int main()
         0xDE, 0xAD, 0xC0, 0xDE, 0x04, 0x04, 0x00, 0x00, 0x01
     };
     assert(!sampvoice_omp::parseHandshake(malformed.data(), malformed.size(), handshake));
+
+    const auto initialize = sampvoice_omp::makeClientInitialize(0x11223344, 0, 2020, 17);
+    assert(initialize[0] == sampvoice_omp::ControlPacket);
+    assert(initialize[1] == 0);
+    assert(initialize[2] == 0x11 && initialize[3] == 0x22 && initialize[4] == 0x33 && initialize[5] == 0x44);
+    assert(initialize[10] == 0x07 && initialize[11] == 0xE4);
+    assert(initialize[12] == 0 && initialize[13] == 17);
 }
