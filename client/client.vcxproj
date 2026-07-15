@@ -96,7 +96,7 @@
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>_WINDLL;NDEBUG;WIN32;WIN32_LEAN_AND_MEAN;NOMINMAX;_CRT_RAND_S;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_WINDLL;NDEBUG;WIN32;WIN32_LEAN_AND_MEAN;NOMINMAX;_CRT_RAND_S;SAMP_R3;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../common;libraries;$(D3DX_INCLUDE_PATH)</AdditionalIncludeDirectories>
       <DebugInformationFormat>None</DebugInformationFormat>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
