@@ -699,9 +699,6 @@ static HWND gOriginalWindowHandle = NULL;
 static LRESULT CALLBACK WindowProcedure(const HWND window, const UINT message,
     const WPARAM wparam, const LPARAM lparam) noexcept
 {
-    if (PluginMenu::Instance().WindowProcedure(window, message, wparam, lparam) != 0)
-        return 1;
-
     return CallWindowProc(reinterpret_cast<WNDPROC>(gOriginalWindowProcedure),
         window, message, wparam, lparam);
 }
@@ -716,7 +713,6 @@ static void DrawRadarHook() noexcept
     static_cast<void(*)()>(gDrawRadarHook.Target())();
 
     SpeakerList::Instance().Render();
-    MicroIcon::Instance().Render();
 }
 
 // Game Callbacks
@@ -786,19 +782,11 @@ static void OnDeviceInitialize(IDirect3D9* const, IDirect3DDevice9* const device
     gBlurShaderResource = File::Content(Storage::Instance().GetResourceFile("gauss.hlsl"));
     gLogoIconResource = File::Content(Storage::Instance().GetResourceFile("logo.png"));
 
-    if (gPassiveMicroIconResource.Valid() && gActiveMicroIconResource.Valid() && gMutedMicroIconResource.Valid())
-        MicroIcon::Instance().Initialize(device, gPassiveMicroIconResource.Area(),
-            gActiveMicroIconResource.Area(), gMutedMicroIconResource.Area());
-
     ImGuiUtils::Instance().Initialize(device);
 
     if (gSpeakerIconResource.Valid())
         SpeakerList::Instance().Initialize(device, gSpeakerIconResource.Area(),
             Storage::Instance().GetResourceFile("font.ttf"));
-
-    if (gBlurShaderResource.Valid() && gLogoIconResource.Valid())
-        PluginMenu::Instance().Initialize(device, gBlurShaderResource.Area(),
-            gLogoIconResource.Area(), Storage::Instance().GetResourceFile("font.ttf"));
 
     gOriginalWindowHandle = parameters.hDeviceWindow;
     gOriginalWindowProcedure = GetWindowLong(gOriginalWindowHandle, GWL_WNDPROC);
@@ -811,18 +799,12 @@ static void OnPresent() noexcept
 {
     MainLoop();
 
-    MicroIcon::Instance().Update();
-
-    PluginMenu::Instance().Update();
-    PluginMenu::Instance().Render();
 }
 
 static void OnBeforeReset() noexcept
 {
-    PluginMenu::Instance().Deinitialize();
     SpeakerList::Instance().Deinitialize();
     ImGuiUtils::Instance().Deinitialize();
-    MicroIcon::Instance().Deinitialize();
 }
 
 static void OnAfterReset(IDirect3DDevice9* const device,
@@ -830,19 +812,12 @@ static void OnAfterReset(IDirect3DDevice9* const device,
 {
     assert(device != nullptr);
 
-    if (gPassiveMicroIconResource.Valid() && gActiveMicroIconResource.Valid() && gMutedMicroIconResource.Valid())
-        MicroIcon::Instance().Initialize(device, gPassiveMicroIconResource.Area(),
-            gActiveMicroIconResource.Area(), gMutedMicroIconResource.Area());
-
     ImGuiUtils::Instance().Initialize(device);
 
     if (gSpeakerIconResource.Valid())
         SpeakerList::Instance().Initialize(device, gSpeakerIconResource.Area(),
             Storage::Instance().GetResourceFile("font.ttf"));
 
-    if (gBlurShaderResource.Valid() && gLogoIconResource.Valid())
-        PluginMenu::Instance().Initialize(device, gBlurShaderResource.Area(),
-            gLogoIconResource.Area(), Storage::Instance().GetResourceFile("font.ttf"));
 }
 
 static void OnDeviceDestroy() noexcept
