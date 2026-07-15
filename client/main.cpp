@@ -165,10 +165,32 @@ static void MainLoop(const Time moment = Clock::Now()) noexcept
 
                     const auto header = reinterpret_cast<const IncomingVoiceHeader*>(buffer);
 
+                    if (header->source >= kMaxPlayers)
+                    {
+                        Logger::Instance().LogToFile("[sv:err:voice] : ignored packet with invalid source(%hu)", header->source);
+                        continue;
+                    }
+
+                    const auto streams_end = reinterpret_cast<const uword_t*>(buffer + length);
+                    auto iterator = header->streams;
+                    bool valid_streams = true;
+                    while (iterator != streams_end && *iterator != None<uword_t>)
+                    {
+                        if (*iterator >= kMaxStreams)
+                        {
+                            valid_streams = false;
+                            break;
+                        }
+                        ++iterator;
+                    }
+                    if (!valid_streams || iterator == streams_end || iterator + 1 >= streams_end)
+                    {
+                        Logger::Instance().LogToFile("[sv:err:voice] : ignored malformed packet from source(%hu)", header->source);
+                        continue;
+                    }
+
                     if (!BlackList::Instance().IsPlayerBlocked(header->source))
                     {
-                        auto iterator = header->streams;
-                        while (*iterator != None<uword_t>) ++iterator;
                         ++iterator;
 
                         gSources[header->source].PushPacket(header->packet, header->streams,
@@ -263,6 +285,7 @@ static void SendManikularSettings() noexcept
     if (Listener::Instance().IsSoundEnable()) flags |= 2;
     if (Listener::Instance().IsSoundBalancer()) flags |= 4;
     if (Listener::Instance().IsSoundFilter()) flags |= 8;
+    if (Speaker::Instance().IsChecking()) flags |= 16;
     packet.push_back(flags);
     packet.push_back(static_cast<ubyte_t>(std::clamp(Speaker::Instance().GetMicroVolume(), 0, 100)));
     packet.push_back(static_cast<ubyte_t>(std::clamp(Listener::Instance().GetSoundVolume(), 0, 100)));
@@ -312,6 +335,7 @@ static bool HandleManikularSettingsCommand(const cptr_t data, const uint_t size)
 
     const ubyte_t action = static_cast<cadr_t>(data)[0];
     const ubyte_t value = size > 1 ? static_cast<cadr_t>(data)[1] : 0;
+    Logger::Instance().LogToFile("[sv:dbg:manikular] : settings command action(%hhu), value(%hhu), size(%u)", action, value, size);
     switch (action)
     {
         case ManikularSetMicroEnable:
@@ -344,7 +368,11 @@ static bool HandleManikularSettingsCommand(const cptr_t data, const uint_t size)
             break;
         case ManikularSetMicroCheck:
             if (size != 2) return false;
-            if (value != 0) Speaker::Instance().StartChecking();
+            if (value != 0)
+            {
+                if (!Speaker::Instance().StartChecking())
+                    Logger::Instance().LogToFile("[sv:err:manikular] : failed to start microphone check");
+            }
             else Speaker::Instance().StopChecking();
             break;
         case ManikularResetAudio:

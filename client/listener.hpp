@@ -128,9 +128,9 @@ public:
 
     void SetSoundEnable(const bool sound_enable) noexcept
     {
+        PluginConfig::Instance().SetSoundEnable(sound_enable);
         if (_is_loaded)
         {
-            PluginConfig::Instance().SetSoundEnable(sound_enable);
             if (!PluginConfig::Instance().IsSoundEnable()) BASS_SetConfig(BASS_CONFIG_GVOL_STREAM, 0);
             else BASS_SetConfig(BASS_CONFIG_GVOL_STREAM, 100 * PluginConfig::Instance().GetSoundVolume());
         }
@@ -138,9 +138,9 @@ public:
 
     void SetSoundVolume(const sdword_t sound_volume) noexcept
     {
+        PluginConfig::Instance().SetSoundVolume(std::clamp(sound_volume, 0, 100));
         if (_is_loaded)
         {
-            PluginConfig::Instance().SetSoundVolume(std::clamp(sound_volume, 0, 100));
             if (PluginConfig::Instance().IsSoundEnable())
                 BASS_SetConfig(BASS_CONFIG_GVOL_STREAM, 100 * PluginConfig::Instance().GetSoundVolume());
         }
@@ -150,9 +150,9 @@ public:
     {
         static HFX balancer_fx_handle = NULL;
 
+        PluginConfig::Instance().SetSoundBalancer(sound_balancer);
         if (_is_loaded)
         {
-            PluginConfig::Instance().SetSoundBalancer(sound_balancer);
             if (PluginConfig::Instance().IsSoundBalancer())
             {
                 if (balancer_fx_handle == NULL)
@@ -199,9 +199,9 @@ public:
     {
         static HFX filter_fx_handle = NULL;
 
+        PluginConfig::Instance().SetSoundFilter(sound_filter);
         if (_is_loaded)
         {
-            PluginConfig::Instance().SetSoundFilter(sound_filter);
             if (PluginConfig::Instance().IsSoundFilter())
             {
                 if (filter_fx_handle == NULL)

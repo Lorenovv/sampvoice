@@ -105,6 +105,7 @@
       <PrecompiledHeaderFile />
       <PrecompiledHeaderOutputFile />
       <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

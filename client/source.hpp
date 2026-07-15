@@ -95,6 +95,9 @@ public:
     void PushPacket(const udword_t packet, const uword_t* const streams,
         const View<const ubyte_t, opus_int32>& content) noexcept
     {
+        if (_decoder == nullptr || streams == nullptr || content.Invalid() || content.Size() == 0)
+            return;
+
         if (packet > _current + kSourceKeepingBuffer || packet + (kSourceMutableBuffer - 1) < _current)
             Reset(packet);
 

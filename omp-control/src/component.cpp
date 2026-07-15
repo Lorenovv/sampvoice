@@ -461,6 +461,8 @@ private:
             json += (flags & 4) ? "true" : "false";
             json += ",\"filter\":";
             json += (flags & 8) ? "true" : "false";
+            json += ",\"checking\":";
+            json += (flags & 16) ? "true" : "false";
             json += ",\"microVolume\":" + std::to_string(microVolume);
             json += ",\"soundVolume\":" + std::to_string(soundVolume);
             json += ",\"selectedDevice\":" + std::to_string(selectedDevice);

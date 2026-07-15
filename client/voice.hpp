@@ -246,27 +246,37 @@ public:
 
         assert(size <= kVoicePacketLimit);
 
+        auto header = static_cast<IncomingVoiceHeader*>(buffer);
+
         if constexpr (HostEndian != NetEndian)
         {
-            utils::bswap(&static_cast<IncomingVoiceHeader*>(buffer)->key);
-            utils::bswap(&static_cast<IncomingVoiceHeader*>(buffer)->packet);
-            utils::bswap(&static_cast<IncomingVoiceHeader*>(buffer)->source);
+            utils::bswap(&header->key);
+            utils::bswap(&header->packet);
+            utils::bswap(&header->source);
         }
 
-        if (static_cast<const IncomingVoiceHeader*>(buffer)->key != GetKey())
+        if (header->key != GetKey())
             goto NextPacket;
 
         if (size == sizeof(IncomingVoiceHeader)) // Change Key Packet
         {
-            SetKey(static_cast<const IncomingVoiceHeader*>(buffer)->packet);
+            SetKey(header->packet);
             goto NextPacket;
         }
 
-        if constexpr (HostEndian != NetEndian)
+        // A received voice packet is untrusted network data.  It must contain
+        // a terminating stream id before the Opus payload; otherwise the old
+        // loop below could walk past the packet and corrupt the game process.
+        const auto streams_end = reinterpret_cast<uword_t*>(static_cast<adr_t>(buffer) + size);
+        auto stream = header->streams;
+        while (stream != streams_end && *stream != None<uword_t>)
         {
-            for (auto iterator = static_cast<IncomingVoiceHeader*>(buffer)->streams;
-                *iterator != None<uword_t>; ++iterator) utils::bswap(iterator);
+            if constexpr (HostEndian != NetEndian)
+                utils::bswap(stream);
+            ++stream;
         }
+        if (stream == streams_end)
+            goto NextPacket;
 
         return size;
     }
