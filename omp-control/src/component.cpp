@@ -9,7 +9,6 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
-#include <random>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -318,12 +317,13 @@ public:
 private:
     std::uint32_t nextVoiceKey()
     {
-        std::uint32_t key = 0;
-        while (key == 0)
-        {
-            key = random();
-        }
-        return key;
+        // Avoid constructing std::random_device while the component is loaded:
+        // it has caused loader crashes on some i386 libstdc++ builds. This key
+        // is only a session nonce, not an authentication secret.
+        keyState ^= keyState << 13;
+        keyState ^= keyState >> 17;
+        keyState ^= keyState << 5;
+        return keyState == 0 ? ++keyState : keyState;
     }
 
     void initializePlayer(IPlayer& peer, Session& session)
@@ -544,7 +544,7 @@ private:
 
     ICore* core = nullptr;
     CommandRelay relay;
-    std::mt19937 random { std::random_device {}() };
+    std::uint32_t keyState = 0x9E3779B9;
     std::unordered_map<int, Session> sessions;
     TimePoint nextProximityUpdate {};
 };
