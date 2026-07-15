@@ -34,6 +34,6 @@ jobs:
         with:
           name: manikular-voice-v4.1-client
           path: |
-            binaries/sampvoice.asi
+            client/binaries/sampvoice.asi
             client/files/binaries/*.dll
             client/files/resources/**
