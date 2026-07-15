@@ -30,6 +30,7 @@ enum class ControlPacketType : std::uint8_t
 {
     ClientInitialize = 0,
     SpeakerActiveChannels = 1,
+    SpeakerSetKey = 3,
     StreamCreate = 4,
     StreamSetTarget = 9,
     StreamDelete = 12
@@ -138,6 +139,16 @@ inline std::array<std::uint8_t, 6> makeSpeakerActiveChannels(std::uint32_t chann
     result[0] = ControlPacket;
     result[1] = static_cast<std::uint8_t>(ControlPacketType::SpeakerActiveChannels);
     writeUInt32BE(result.data() + 2, channels);
+    return result;
+}
+
+inline std::array<std::uint8_t, 7> makeSpeakerSetKey(std::uint32_t channels, std::uint8_t key)
+{
+    std::array<std::uint8_t, 7> result {};
+    result[0] = ControlPacket;
+    result[1] = static_cast<std::uint8_t>(ControlPacketType::SpeakerSetKey);
+    writeUInt32BE(result.data() + 2, channels);
+    result[6] = key;
     return result;
 }
 
