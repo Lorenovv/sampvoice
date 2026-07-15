@@ -27,21 +27,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          repository: openmultiplayer/open.mp-sdk
-          path: third_party/openmp-sdk
+          repository: openmultiplayer/open.mp
+          ref: v1.5.8.3079
+          path: third_party/openmp
           submodules: recursive
-      - uses: actions/checkout@v4
-        with:
-          repository: openmultiplayer/open.mp-network
-          path: third_party/openmp-network
       - name: Install 32-bit compiler support
         run: sudo apt-get update && sudo apt-get install -y g++-multilib
       - name: Configure component
         run: >-
           cmake -S omp-control -B build/component
           -DSAMPVOICE_OMP_BUILD_COMPONENT=ON
-          -DOPENMP_SDK_ROOT=${{ github.workspace }}/third_party/openmp-sdk
-          -DOPENMP_NETWORK_INCLUDE=${{ github.workspace }}/third_party/openmp-network
+          -DOPENMP_SDK_ROOT=${{ github.workspace }}/third_party/openmp/SDK
+          -DOPENMP_NETWORK_INCLUDE=${{ github.workspace }}/third_party/openmp/Shared/Network
           -DCMAKE_CXX_FLAGS=-m32
       - name: Build 32-bit component
         run: cmake --build build/component --target sampvoice-omp-control
