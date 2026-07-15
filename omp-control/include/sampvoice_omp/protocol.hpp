@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace sampvoice_omp
 {
@@ -27,7 +28,11 @@ struct ConnectData
 
 enum class ControlPacketType : std::uint8_t
 {
-    ClientInitialize = 0
+    ClientInitialize = 0,
+    SpeakerActiveChannels = 1,
+    StreamCreate = 4,
+    StreamSetTarget = 9,
+    StreamDelete = 12
 };
 
 #pragma pack(push, 1)
@@ -107,6 +112,13 @@ inline void writeUInt32BE(std::uint8_t* output, std::uint32_t value)
     output[3] = static_cast<std::uint8_t>(value);
 }
 
+inline void writeFloatBE(std::uint8_t* output, float value)
+{
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    writeUInt32BE(output, bits);
+}
+
 inline std::array<std::uint8_t, 2 + sizeof(ClientInitialize)> makeClientInitialize(
     std::uint32_t voiceKey, std::uint32_t voiceHost, std::uint16_t voicePort, std::uint16_t voiceId)
 {
@@ -117,6 +129,44 @@ inline std::array<std::uint8_t, 2 + sizeof(ClientInitialize)> makeClientInitiali
     writeUInt32BE(result.data() + 6, voiceHost);
     writeUInt16BE(result.data() + 10, voicePort);
     writeUInt16BE(result.data() + 12, voiceId);
+    return result;
+}
+
+inline std::array<std::uint8_t, 6> makeSpeakerActiveChannels(std::uint32_t channels)
+{
+    std::array<std::uint8_t, 6> result {};
+    result[0] = ControlPacket;
+    result[1] = static_cast<std::uint8_t>(ControlPacketType::SpeakerActiveChannels);
+    writeUInt32BE(result.data() + 2, channels);
+    return result;
+}
+
+inline std::array<std::uint8_t, 8> makeStreamCreate(std::uint16_t stream, float distance)
+{
+    std::array<std::uint8_t, 8> result {};
+    result[0] = ControlPacket;
+    result[1] = static_cast<std::uint8_t>(ControlPacketType::StreamCreate);
+    writeUInt16BE(result.data() + 2, stream);
+    writeFloatBE(result.data() + 4, distance);
+    return result;
+}
+
+inline std::array<std::uint8_t, 6> makeStreamSetTarget(std::uint16_t stream, std::uint16_t target)
+{
+    std::array<std::uint8_t, 6> result {};
+    result[0] = ControlPacket;
+    result[1] = static_cast<std::uint8_t>(ControlPacketType::StreamSetTarget);
+    writeUInt16BE(result.data() + 2, stream);
+    writeUInt16BE(result.data() + 4, target);
+    return result;
+}
+
+inline std::array<std::uint8_t, 4> makeStreamDelete(std::uint16_t stream)
+{
+    std::array<std::uint8_t, 4> result {};
+    result[0] = ControlPacket;
+    result[1] = static_cast<std::uint8_t>(ControlPacketType::StreamDelete);
+    writeUInt16BE(result.data() + 2, stream);
     return result;
 }
 } // namespace sampvoice_omp

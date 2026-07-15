@@ -25,4 +25,12 @@ int main()
     assert(initialize[2] == 0x11 && initialize[3] == 0x22 && initialize[4] == 0x33 && initialize[5] == 0x44);
     assert(initialize[10] == 0x07 && initialize[11] == 0xE4);
     assert(initialize[12] == 0 && initialize[13] == 17);
+
+    const auto channels = sampvoice_omp::makeSpeakerActiveChannels(1);
+    assert(channels[0] == sampvoice_omp::ControlPacket && channels[1] == 1);
+    assert(channels[2] == 0 && channels[3] == 0 && channels[4] == 0 && channels[5] == 1);
+
+    const auto target = sampvoice_omp::makeStreamSetTarget(15, (2 << 14) | 17);
+    assert(target[1] == 9 && target[2] == 0 && target[3] == 15);
+    assert(target[4] == 0x80 && target[5] == 17);
 }
