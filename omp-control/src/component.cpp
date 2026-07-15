@@ -28,6 +28,7 @@ constexpr std::uint16_t VoicePort = 2020;
 constexpr float VoiceDistance = 20.0f;
 constexpr float VoiceDistanceSquared = VoiceDistance * VoiceDistance;
 constexpr std::uint32_t VoiceChannel = 1;
+constexpr std::uint8_t VoicePushToTalkKey = 0x5A; // Z
 constexpr std::uint8_t CommandPlayerCreate = 1;
 constexpr std::uint8_t CommandPlayerSpeaker = 3;
 constexpr std::uint8_t CommandPlayerAttachStream = 4;
@@ -335,6 +336,8 @@ private:
         peer.sendPacket(Span<std::uint8_t>(packet.data(), packet.size() * 8), OrderingChannel_SyncRPC);
         auto channels = sampvoice_omp::makeSpeakerActiveChannels(VoiceChannel);
         peer.sendPacket(Span<std::uint8_t>(channels.data(), channels.size() * 8), OrderingChannel_SyncRPC);
+        auto key = sampvoice_omp::makeSpeakerSetKey(VoiceChannel, VoicePushToTalkKey);
+        peer.sendPacket(Span<std::uint8_t>(key.data(), key.size() * 8), OrderingChannel_SyncRPC);
     }
 
     void synchronizeAll()

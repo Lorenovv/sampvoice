@@ -30,6 +30,9 @@ int main()
     assert(channels[0] == sampvoice_omp::ControlPacket && channels[1] == 1);
     assert(channels[2] == 0 && channels[3] == 0 && channels[4] == 0 && channels[5] == 1);
 
+    const auto key = sampvoice_omp::makeSpeakerSetKey(1, 0x5A);
+    assert(key[1] == 3 && key[5] == 1 && key[6] == 0x5A);
+
     const auto target = sampvoice_omp::makeStreamSetTarget(15, (2 << 14) | 17);
     assert(target[1] == 9 && target[2] == 0 && target[3] == 15);
     assert(target[4] == 0x80 && target[5] == 17);
