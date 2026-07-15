@@ -5,11 +5,11 @@ plug-in. It preserves the v4 client protocol, but must use only the supported
 open.mp SDK: no `CNetGame`, YSF offsets, RakNet vtable hooks, or server-memory
 patches.
 
-The first milestone verifies the v4 client handshake received through RPC 25.
-It deliberately does not initialise a voice client yet, so it is not ready for
-deployment. The next milestone adds the relay command channel and the
-`ClientInitialize` packet; only after a two-client test will stream/Pawn API
-work be integrated.
+The component now accepts the v4 handshake through RPC 25, opens the local
+control channel expected by `sampvoice.out`, and returns `ClientInitialize`
+without any SA:MP memory hooks. It still has no stream/Pawn API, so it is **not
+ready for deployment**. The next milestone creates proximity streams and adds
+the compatibility natives; only after a two-client test will it be integrated.
 
 Configure a build with the SDK and the `open.mp-network` headers that match the
 target server:

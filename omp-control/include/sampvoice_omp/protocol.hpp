@@ -92,4 +92,31 @@ inline bool parseHandshake(const std::uint8_t* data, std::size_t size, Handshake
 
     return false;
 }
+
+inline void writeUInt16BE(std::uint8_t* output, std::uint16_t value)
+{
+    output[0] = static_cast<std::uint8_t>(value >> 8);
+    output[1] = static_cast<std::uint8_t>(value);
+}
+
+inline void writeUInt32BE(std::uint8_t* output, std::uint32_t value)
+{
+    output[0] = static_cast<std::uint8_t>(value >> 24);
+    output[1] = static_cast<std::uint8_t>(value >> 16);
+    output[2] = static_cast<std::uint8_t>(value >> 8);
+    output[3] = static_cast<std::uint8_t>(value);
+}
+
+inline std::array<std::uint8_t, 2 + sizeof(ClientInitialize)> makeClientInitialize(
+    std::uint32_t voiceKey, std::uint32_t voiceHost, std::uint16_t voicePort, std::uint16_t voiceId)
+{
+    std::array<std::uint8_t, 2 + sizeof(ClientInitialize)> result {};
+    result[0] = ControlPacket;
+    result[1] = static_cast<std::uint8_t>(ControlPacketType::ClientInitialize);
+    writeUInt32BE(result.data() + 2, voiceKey);
+    writeUInt32BE(result.data() + 6, voiceHost);
+    writeUInt16BE(result.data() + 10, voicePort);
+    writeUInt16BE(result.data() + 12, voiceId);
+    return result;
+}
 } // namespace sampvoice_omp
