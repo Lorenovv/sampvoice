@@ -47,3 +47,9 @@ jobs:
         run: cmake --build build/component --target sampvoice-omp-control
       - name: Check target architecture
         run: file build/component/sampvoice-omp-control.so | grep -F 'ELF 32-bit'
+      - name: Upload test component
+        uses: actions/upload-artifact@v4
+        with:
+          name: sampvoice-omp-control-linux-x86
+          path: build/component/sampvoice-omp-control.so
+          if-no-files-found: error

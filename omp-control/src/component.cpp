@@ -342,9 +342,9 @@ private:
         sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(peer.getID()));
         sampvoice_omp::writeUInt32BE(command.data() + 3, session.voiceKey);
         relay.enqueue(std::move(command));
+        queueStreamCreate(peer.getID());
         queuePlayerSpeaker(peer.getID());
         queuePlayerAttachStream(peer.getID());
-        queueStreamCreate(peer.getID());
 
         auto packet = sampvoice_omp::makeClientInitialize(session.voiceKey, 0, VoicePort,
             static_cast<std::uint16_t>(peer.getID()));
