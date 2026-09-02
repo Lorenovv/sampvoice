@@ -33,16 +33,21 @@ constexpr std::uint16_t ControlPort = 2020;
 constexpr std::uint16_t VoicePort = 2020;
 constexpr float VoiceDistance = 20.0f;
 constexpr float VoiceDistanceSquared = VoiceDistance * VoiceDistance;
-constexpr std::uint32_t VoiceChannel = 1;
+constexpr std::uint32_t ProximityChannel = 1;
+constexpr std::uint32_t PhoneChannel = 2;
 constexpr std::uint8_t VoicePushToTalkKey = 0x5A; // Z
+constexpr std::uint16_t PhoneStreamFirst = 1024;
+constexpr std::uint16_t PhoneStreamLimit = 4096;
 constexpr std::uint8_t CommandPlayerCreate = 1;
 constexpr std::uint8_t CommandPlayerSpeaker = 3;
 constexpr std::uint8_t CommandPlayerAttachStream = 4;
+constexpr std::uint8_t CommandPlayerDetachStream = 5;
 constexpr std::uint8_t CommandPlayerDelete = 6;
 constexpr std::uint8_t CommandStreamCreate = 7;
 constexpr std::uint8_t CommandStreamTransiter = 8;
 constexpr std::uint8_t CommandStreamAttachListener = 9;
 constexpr std::uint8_t CommandStreamDetachListener = 10;
+constexpr std::uint8_t CommandStreamDelete = 11;
 
 constexpr std::array<std::uint8_t, 3> ManikularMagic { 'M', 'V', 1 };
 constexpr std::uint8_t ManikularSnapshot = 1;
@@ -166,6 +171,13 @@ struct Session
     std::unordered_set<int> listeners;
 };
 
+struct PhoneCall
+{
+    std::uint16_t stream;
+    int firstPlayer;
+    int secondPlayer;
+};
+
 struct SpatialCell
 {
     int x;
@@ -211,7 +223,7 @@ public:
 
     SemanticVersion componentVersion() const override
     {
-        return SemanticVersion(0, 2, 0, 0);
+        return SemanticVersion(0, 3, 0, 0);
     }
 
     UID getUID() override
@@ -242,6 +254,9 @@ public:
         script.Register("MV_RequestVoiceSettings", NativeRequestVoiceSettings);
         script.Register("MV_SetVoiceOption", NativeSetVoiceOption);
         script.Register("MV_SetVoiceBlacklist", NativeSetVoiceBlacklist);
+        script.Register("MV_IsVoiceReady", NativeIsVoiceReady);
+        script.Register("MV_StartPhoneCall", NativeStartPhoneCall);
+        script.Register("MV_StopPhoneCall", NativeStopPhoneCall);
     }
 
     void onAmxUnload(IPawnScript&) override
@@ -277,6 +292,7 @@ public:
     void onPeerDisconnect(IPlayer& peer, PeerDisconnectReason) override
     {
         const int playerId = peer.getID();
+        stopPhoneCall(playerId);
         auto source = sessions.find(playerId);
         if (source != sessions.end())
         {
@@ -335,7 +351,13 @@ public:
 
     void reset() override
     {
+        while (!phoneStreamByPlayer.empty())
+        {
+            stopPhoneCall(phoneStreamByPlayer.begin()->first);
+        }
         sessions.clear();
+        phoneCalls.clear();
+        phoneStreamByPlayer.clear();
     }
 
     ~SampVoiceOMPControl() override
@@ -550,6 +572,24 @@ private:
         return instance->sendManikularBlacklist(static_cast<int>(params[1]), name, params[3] != 0) ? 1 : 0;
     }
 
+    static cell NativeIsVoiceReady(AMX*, const cell* params)
+    {
+        if (instance == nullptr || params == nullptr || params[0] != sizeof(cell)) return 0;
+        return instance->isVoiceReady(static_cast<int>(params[1])) ? 1 : 0;
+    }
+
+    static cell NativeStartPhoneCall(AMX*, const cell* params)
+    {
+        if (instance == nullptr || params == nullptr || params[0] != 2 * sizeof(cell)) return 0;
+        return instance->startPhoneCall(static_cast<int>(params[1]), static_cast<int>(params[2])) ? 1 : 0;
+    }
+
+    static cell NativeStopPhoneCall(AMX*, const cell* params)
+    {
+        if (instance == nullptr || params == nullptr || params[0] != sizeof(cell)) return 0;
+        return instance->stopPhoneCall(static_cast<int>(params[1])) ? 1 : 0;
+    }
+
     std::uint32_t nextVoiceKey()
     {
         // Avoid constructing std::random_device while the component is loaded:
@@ -578,15 +618,15 @@ private:
         sampvoice_omp::writeUInt32BE(command.data() + 3, session.voiceKey);
         relay.enqueue(std::move(command));
         queueStreamCreate(peer.getID());
-        queuePlayerSpeaker(peer.getID());
-        queuePlayerAttachStream(peer.getID());
+        queuePlayerSpeaker(peer.getID(), ProximityChannel);
+        queuePlayerStream(CommandPlayerAttachStream, peer.getID(), ProximityChannel, peer.getID());
 
         auto packet = sampvoice_omp::makeClientInitialize(session.voiceKey, 0, VoicePort,
             static_cast<std::uint16_t>(peer.getID()));
         peer.sendPacket(Span<std::uint8_t>(packet.data(), packet.size() * 8), OrderingChannel_SyncRPC);
-        auto channels = sampvoice_omp::makeSpeakerActiveChannels(VoiceChannel);
+        auto channels = sampvoice_omp::makeSpeakerActiveChannels(ProximityChannel);
         peer.sendPacket(Span<std::uint8_t>(channels.data(), channels.size() * 8), OrderingChannel_SyncRPC);
-        auto key = sampvoice_omp::makeSpeakerSetKey(VoiceChannel, VoicePushToTalkKey);
+        auto key = sampvoice_omp::makeSpeakerSetKey(ProximityChannel | PhoneChannel, VoicePushToTalkKey);
         peer.sendPacket(Span<std::uint8_t>(key.data(), key.size() * 8), OrderingChannel_SyncRPC);
     }
 
@@ -600,6 +640,7 @@ private:
                 initializePlayer(*player, entry.second);
             }
         }
+        synchronizePhoneCalls();
     }
 
     static SpatialCell makeCell(const IPlayer& player)
@@ -614,22 +655,22 @@ private:
         };
     }
 
-    void queuePlayerSpeaker(int playerId)
+    void queuePlayerSpeaker(int playerId, std::uint32_t channels)
     {
         std::vector<std::uint8_t> command(7);
         command[0] = CommandPlayerSpeaker;
         sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(playerId));
-        sampvoice_omp::writeUInt32BE(command.data() + 3, VoiceChannel);
+        sampvoice_omp::writeUInt32BE(command.data() + 3, channels);
         relay.enqueue(std::move(command));
     }
 
-    void queuePlayerAttachStream(int playerId)
+    void queuePlayerStream(std::uint8_t commandType, int playerId, std::uint32_t channels, int streamId)
     {
         std::vector<std::uint8_t> command(9);
-        command[0] = CommandPlayerAttachStream;
+        command[0] = commandType;
         sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(playerId));
-        sampvoice_omp::writeUInt32BE(command.data() + 3, VoiceChannel);
-        sampvoice_omp::writeUInt16BE(command.data() + 7, static_cast<std::uint16_t>(playerId));
+        sampvoice_omp::writeUInt32BE(command.data() + 3, channels);
+        sampvoice_omp::writeUInt16BE(command.data() + 7, static_cast<std::uint16_t>(streamId));
         relay.enqueue(std::move(command));
     }
 
@@ -660,10 +701,137 @@ private:
         relay.enqueue(std::move(command));
     }
 
+    void queueStreamDelete(int streamId)
+    {
+        std::vector<std::uint8_t> command(3);
+        command[0] = CommandStreamDelete;
+        sampvoice_omp::writeUInt16BE(command.data() + 1, static_cast<std::uint16_t>(streamId));
+        relay.enqueue(std::move(command));
+    }
+
     template <std::size_t Size>
     static void sendControlPacket(IPlayer& player, std::array<std::uint8_t, Size>& packet)
     {
         player.sendPacket(Span<std::uint8_t>(packet.data(), packet.size() * 8), OrderingChannel_SyncRPC);
+    }
+
+    bool isVoiceReady(int playerId) const
+    {
+        const auto session = sessions.find(playerId);
+        return relay.isConnected() && session != sessions.end() &&
+            session->second.initializedGeneration == relay.currentGeneration();
+    }
+
+    void setPlayerChannel(int playerId, std::uint32_t channels)
+    {
+        if (relay.isConnected())
+        {
+            queuePlayerSpeaker(playerId, channels);
+        }
+        if (IPlayer* player = core == nullptr ? nullptr : core->getPlayers().get(playerId))
+        {
+            auto packet = sampvoice_omp::makeSpeakerActiveChannels(channels);
+            sendControlPacket(*player, packet);
+        }
+    }
+
+    std::uint16_t allocatePhoneStream() const
+    {
+        for (std::uint16_t stream = PhoneStreamFirst; stream < PhoneStreamLimit; ++stream)
+        {
+            if (phoneCalls.find(stream) == phoneCalls.end()) return stream;
+        }
+        return 0;
+    }
+
+    void sendPhoneStreamCreate(int playerId, std::uint16_t streamId)
+    {
+        if (IPlayer* player = core == nullptr ? nullptr : core->getPlayers().get(playerId))
+        {
+            auto packet = sampvoice_omp::makeStreamCreate(streamId, 0.0f);
+            sendControlPacket(*player, packet);
+        }
+    }
+
+    void sendPhoneStreamDelete(int playerId, std::uint16_t streamId)
+    {
+        if (IPlayer* player = core == nullptr ? nullptr : core->getPlayers().get(playerId))
+        {
+            auto packet = sampvoice_omp::makeStreamDelete(streamId);
+            sendControlPacket(*player, packet);
+        }
+    }
+
+    void synchronizePhoneCall(const PhoneCall& call)
+    {
+        if (!isVoiceReady(call.firstPlayer) || !isVoiceReady(call.secondPlayer)) return;
+
+        queueStreamCreate(call.stream);
+        for (const int playerId : { call.firstPlayer, call.secondPlayer })
+        {
+            queuePlayerStream(CommandPlayerAttachStream, playerId, PhoneChannel, call.stream);
+            queueStreamListener(CommandStreamAttachListener, call.stream, playerId);
+            sendPhoneStreamCreate(playerId, call.stream);
+            setPlayerChannel(playerId, PhoneChannel);
+        }
+    }
+
+    void synchronizePhoneCalls()
+    {
+        for (const auto& entry : phoneCalls)
+        {
+            synchronizePhoneCall(entry.second);
+        }
+    }
+
+    bool startPhoneCall(int firstPlayer, int secondPlayer)
+    {
+        if (firstPlayer == secondPlayer || !isVoiceReady(firstPlayer) || !isVoiceReady(secondPlayer) ||
+            phoneStreamByPlayer.find(firstPlayer) != phoneStreamByPlayer.end() ||
+            phoneStreamByPlayer.find(secondPlayer) != phoneStreamByPlayer.end())
+        {
+            return false;
+        }
+
+        const std::uint16_t stream = allocatePhoneStream();
+        if (stream == 0) return false;
+
+        const PhoneCall call { stream, firstPlayer, secondPlayer };
+        phoneCalls.emplace(stream, call);
+        phoneStreamByPlayer.emplace(firstPlayer, stream);
+        phoneStreamByPlayer.emplace(secondPlayer, stream);
+        synchronizePhoneCall(call);
+        return true;
+    }
+
+    bool stopPhoneCall(int playerId)
+    {
+        const auto playerCall = phoneStreamByPlayer.find(playerId);
+        if (playerCall == phoneStreamByPlayer.end()) return false;
+
+        const std::uint16_t stream = playerCall->second;
+        const auto callEntry = phoneCalls.find(stream);
+        if (callEntry == phoneCalls.end())
+        {
+            phoneStreamByPlayer.erase(playerCall);
+            return false;
+        }
+
+        const PhoneCall call = callEntry->second;
+        for (const int participantId : { call.firstPlayer, call.secondPlayer })
+        {
+            if (relay.isConnected())
+            {
+                queuePlayerStream(CommandPlayerDetachStream, participantId, PhoneChannel, stream);
+                queueStreamListener(CommandStreamDetachListener, stream, participantId);
+            }
+            sendPhoneStreamDelete(participantId, stream);
+            if (isVoiceReady(participantId)) setPlayerChannel(participantId, ProximityChannel);
+            phoneStreamByPlayer.erase(participantId);
+        }
+        if (relay.isConnected()) queueStreamDelete(stream);
+        phoneCalls.erase(callEntry);
+        return true;
     }
 
     void attachListener(int sourceId, int listenerId)
@@ -783,6 +951,8 @@ private:
     CommandRelay relay;
     std::uint32_t keyState = 0x9E3779B9;
     std::unordered_map<int, Session> sessions;
+    std::unordered_map<std::uint16_t, PhoneCall> phoneCalls;
+    std::unordered_map<int, std::uint16_t> phoneStreamByPlayer;
     TimePoint nextProximityUpdate {};
     bool networkHandlersRegistered = false;
     IPawnComponent* pawnComponent = nullptr;
